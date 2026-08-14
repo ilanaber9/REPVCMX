@@ -108,28 +108,23 @@
 
       {% if p['estado'] == 'pendiente' %}
       <form class="estado-form" method="post" action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
+        <input type="hidden" name="parte" value="principal">
         <input type="text" name="notas" placeholder="Notas (opcional)" value="{{ p['notas'] or '' }}" style="flex:1; min-width:160px;">
+        {% if p['tipo_redistribucion'] is none %}
         <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
           Kg recolectados
           <input type="number" name="kg" step="0.1" min="0" placeholder="0"
                  value="{{ p['kg_recolectados'] or '' }}" style="width:120px;">
         </label>
+        {% endif %}
         {% if p['cantidad_cajas'] is not none %}
         <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
           {{ 'Cajas entregadas' if p['tipo'] == 'entrega' else 'Cajas recibidas' }} (solicitó {{ p['cantidad_cajas'] }})
           <input type="number" name="cajas" step="1" min="0" placeholder="{{ p['cantidad_cajas'] }}"
                  value="{{ p['cajas_reales'] if p['cajas_reales'] is not none else '' }}" style="width:140px;">
         </label>
-        {% elif p['cantidad_cajas_extra'] is not none %}
-        <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
-          {{ 'Cajas entregadas' if p['tipo_extra'] == 'entrega' else 'Cajas recibidas' }} (solicitó {{ p['cantidad_cajas_extra'] }})
-          <input type="number" name="cajas" step="1" min="0" placeholder="{{ p['cantidad_cajas_extra'] }}"
-                 value="{{ p['cajas_reales'] if p['cajas_reales'] is not none else '' }}" style="width:140px;">
-        </label>
         {% endif %}
-        {% if p['solicitud_extra_id'] %}
-        <button class="small" type="submit" name="estado" value="completada">Marcar completado</button>
-        {% elif p['tipo'] == 'entrega' and p['tipo_redistribucion'] is none %}
+        {% if p['tipo'] == 'entrega' and p['tipo_redistribucion'] is none %}
         <button class="small" type="submit" name="estado" value="completada">Bote entregado</button>
         {% elif p['tipo'] == 'entrega' and p['tipo_redistribucion'] == 'material' %}
         <button class="small" type="submit" name="estado" value="completada">Cajas entregadas</button>
@@ -145,6 +140,40 @@
         {% if p['notas'] %}Notas: {{ p['notas'] }}{% endif %}
         {% if p['kg_recolectados'] %}{% if p['notas'] %} · {% endif %}{{ "%.1f"|format(p['kg_recolectados']) }} kg recolectados{% endif %}
         {% if p['cajas_reales'] is not none %}{% if p['notas'] or p['kg_recolectados'] %} · {% endif %}{{ p['cajas_reales'] }} {{ 'cajas entregadas' if p['tipo'] == 'entrega' else 'cajas recibidas' }}{% endif %}
+        {% if p['estado'] == 'ausente' %} · No estaba en casa{% endif %}
+      </div>
+      {% endif %}
+
+      {% if p['solicitud_extra_id'] %}
+      <div style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);">
+        <span style="font-size:0.8rem; color:var(--muted);">Segunda solicitud en esta visita:</span>
+        {% if p['estado_extra'] == 'pendiente' %}
+        <form class="estado-form" method="post" action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
+          <input type="hidden" name="parte" value="extra">
+          {% if p['cantidad_cajas_extra'] is not none %}
+          <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
+            {{ 'Cajas entregadas' if p['tipo_extra'] == 'entrega' else 'Cajas recibidas' }} (solicitó {{ p['cantidad_cajas_extra'] }})
+            <input type="number" name="cajas" step="1" min="0" placeholder="{{ p['cantidad_cajas_extra'] }}"
+                   value="{{ p['cajas_reales_extra'] if p['cajas_reales_extra'] is not none else '' }}" style="width:140px;">
+          </label>
+          {% endif %}
+          {% if p['tipo_extra'] == 'entrega' and p['tipo_redistribucion_extra'] is none %}
+          <button class="small" type="submit" name="estado" value="completada">Bote entregado</button>
+          {% elif p['tipo_extra'] == 'entrega' and p['tipo_redistribucion_extra'] == 'material' %}
+          <button class="small" type="submit" name="estado" value="completada">Cajas entregadas</button>
+          {% elif p['tipo_redistribucion_extra'] == 'donar' %}
+          <button class="small" type="submit" name="estado" value="completada">Cajas recibidas</button>
+          {% else %}
+          <button class="small" type="submit" name="estado" value="completada">Material recolectado</button>
+          {% endif %}
+          <button class="small warn" type="submit" name="estado" value="ausente">No está en casa</button>
+        </form>
+        {% else %}
+        <div class="estado-form" style="margin-top:4px; font-size:0.85rem; color:var(--muted);">
+          {% if p['cajas_reales_extra'] is not none %}{{ p['cajas_reales_extra'] }} {{ 'cajas entregadas' if p['tipo_extra'] == 'entrega' else 'cajas recibidas' }}{% endif %}
+          {% if p['estado_extra'] == 'ausente' %} · No estaba en casa{% endif %}
+        </div>
+        {% endif %}
       </div>
       {% endif %}
     </li>

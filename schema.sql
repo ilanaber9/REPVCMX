@@ -202,9 +202,11 @@ CREATE TABLE paradas (
   orden INTEGER NOT NULL,
   tipo TEXT NOT NULL DEFAULT 'recoleccion' CHECK(tipo IN ('recoleccion','entrega')),
   estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente','completada','incidencia','ausente')),
+  estado_extra TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado_extra IN ('pendiente','completada','incidencia','ausente')),
   notas TEXT,
   kg_recolectados REAL,
   cajas_reales INTEGER,
+  cajas_reales_extra INTEGER,
   confirmado_paciente TEXT,
   confirmacion_token TEXT
 );

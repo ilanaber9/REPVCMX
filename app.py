@@ -2208,12 +2208,16 @@ def admin_eliminar_ruta(user, ruta_id):
         flash("Esa ruta ya no existe.", "error")
         return redirect(url_for("admin_dashboard", tab="rutas"))
 
-    paradas_pendientes = db.execute(
-        "SELECT * FROM paradas WHERE ruta_id = ? AND estado = 'pendiente'", (ruta_id,)
-    ).fetchall()
-    for p in paradas_pendientes:
-        estado_previo = "pendiente_entrega" if p["tipo"] == "entrega" else "pendiente"
-        db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo, p["solicitud_id"]))
+    paradas_ruta = db.execute("SELECT * FROM paradas WHERE ruta_id = ?", (ruta_id,)).fetchall()
+    for p in paradas_ruta:
+        if p["estado"] == "pendiente":
+            estado_previo = "pendiente_entrega" if p["tipo"] == "entrega" else "pendiente"
+            db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo, p["solicitud_id"]))
+        if p["solicitud_extra_id"] and p["estado_extra"] == "pendiente":
+            estado_previo_extra = "pendiente_entrega" if p["tipo_extra"] == "entrega" else "pendiente"
+            db.execute(
+                "UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo_extra, p["solicitud_extra_id"])
+            )
 
     db.execute("DELETE FROM paradas WHERE ruta_id = ?", (ruta_id,))
     db.execute("DELETE FROM rutas WHERE id = ?", (ruta_id,))
@@ -2237,6 +2241,11 @@ def admin_quitar_parada(user, parada_id):
     if parada["estado"] == "pendiente":
         estado_previo = "pendiente_entrega" if parada["tipo"] == "entrega" else "pendiente"
         db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo, parada["solicitud_id"]))
+    if parada["solicitud_extra_id"] and parada["estado_extra"] == "pendiente":
+        estado_previo_extra = "pendiente_entrega" if parada["tipo_extra"] == "entrega" else "pendiente"
+        db.execute(
+            "UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo_extra, parada["solicitud_extra_id"])
+        )
 
     db.execute("DELETE FROM paradas WHERE id = ?", (parada_id,))
     db.commit()
@@ -3128,12 +3137,44 @@ def recolector_finalizar_ruta(user, ruta_id):
     return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
 
 
+def _resolver_resultado_parte(db, solicitud_id, tipo, tipo_redistribucion, material, cantidad_cajas,
+                               resultado, parada_id, sufijo_notas=""):
+    """Aplica el resultado (completada/ausente/incidencia) que el recolector reportó para UNA
+    parte de una parada —la solicitud principal, o la fusionada como 'extra' en la misma
+    visita— actualizando el estado de esa solicitud y, si corresponde, registrando el
+    movimiento de inventario de botes o cajas. tipo/tipo_redistribucion/material/cantidad_cajas
+    ya vienen resueltos para esa parte específica."""
+    es_entrega = tipo == "entrega"
+    if resultado == "completada":
+        if tipo_redistribucion is None:
+            fecha_reinicio = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            db.execute(
+                "UPDATE solicitudes SET estado = 'pendiente', fecha_reinicio_espera = ? WHERE id = ?",
+                (fecha_reinicio, solicitud_id),
+            )
+            if es_entrega:
+                registrar_movimiento_botes(db, "entrega", 1, f"Parada #{parada_id}{sufijo_notas}")
+        else:
+            db.execute("UPDATE solicitudes SET estado = 'recolectada' WHERE id = ?", (solicitud_id,))
+            if cantidad_cajas:
+                signo = 1 if tipo_redistribucion == "donar" else -1
+                registrar_movimiento_cajas(
+                    db, material, "donacion" if signo > 0 else "entrega",
+                    signo * cantidad_cajas, f"Parada #{parada_id}{sufijo_notas}",
+                )
+    elif resultado == "ausente":
+        solicitud_estado = "pendiente_entrega" if es_entrega else "pendiente"
+        db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (solicitud_estado, solicitud_id))
+    else:
+        db.execute("UPDATE solicitudes SET estado = 'incidencia' WHERE id = ?", (solicitud_id,))
+
+
 @app.route("/recolector/paradas/<int:parada_id>/actualizar", methods=["POST"])
 @login_required("recolector")
 def recolector_actualizar_parada(user, parada_id):
-    estado = request.form["estado"]
-    notas = request.form.get("notas", "").strip()
-    if estado not in ("completada", "incidencia", "ausente"):
+    resultado = request.form.get("estado")
+    parte = request.form.get("parte", "principal")
+    if resultado not in ("completada", "incidencia", "ausente"):
         flash("Estado inválido.", "error")
         return redirect(url_for("recolector_dashboard"))
 
@@ -3150,125 +3191,78 @@ def recolector_actualizar_parada(user, parada_id):
     if parada is None or parada["recolector_id"] != user["id"]:
         flash("No puedes editar esa parada.", "error")
         return redirect(url_for("recolector_dashboard"))
-    if parada["estado"] != "pendiente":
-        flash("Esa parada ya quedó registrada y no se puede cambiar.", "error")
+
+    resolviendo_extra = parte == "extra" and parada["solicitud_extra_id"] is not None
+    campo_estado = "estado_extra" if resolviendo_extra else "estado"
+    if parada[campo_estado] != "pendiente":
+        flash("Esa parte ya quedó registrada y no se puede cambiar.", "error")
         return redirect(url_for("recolector_ver_ruta", ruta_id=parada["ruta_id"]))
 
-    db.execute("UPDATE paradas SET estado = ?, notas = ? WHERE id = ?", (estado, notas, parada_id))
+    notas = request.form.get("notas", "").strip()
+    if notas:
+        db.execute("UPDATE paradas SET notas = ? WHERE id = ?", (notas, parada_id))
 
-    es_entrega = parada["tipo"] == "entrega"
+    if "kg" in request.form:
+        kg_raw = request.form.get("kg", "").strip()
+        kg_final = 0.0
+        if resultado == "completada" and kg_raw:
+            try:
+                kg_final = max(0.0, float(kg_raw))
+            except ValueError:
+                kg_final = 0.0
+        kg_anterior = parada["kg_recolectados"] or 0.0
+        db.execute("UPDATE paradas SET kg_recolectados = ? WHERE id = ?", (kg_final, parada_id))
+        delta_kg = kg_final - kg_anterior
+        if parada["cliente_id"] and delta_kg:
+            db.execute(
+                "UPDATE users SET material_recolectado_kg = material_recolectado_kg + ? WHERE id = ?",
+                (delta_kg, parada["cliente_id"]),
+            )
 
-    kg_raw = request.form.get("kg", "").strip()
-    kg_final = 0.0
-    if estado == "completada" and kg_raw:
-        try:
-            kg_final = max(0.0, float(kg_raw))
-        except ValueError:
-            kg_final = 0.0
-    kg_anterior = parada["kg_recolectados"] or 0.0
-    db.execute("UPDATE paradas SET kg_recolectados = ? WHERE id = ?", (kg_final, parada_id))
-    delta_kg = kg_final - kg_anterior
-    if parada["cliente_id"] and delta_kg:
-        db.execute(
-            "UPDATE users SET material_recolectado_kg = material_recolectado_kg + ? WHERE id = ?",
-            (delta_kg, parada["cliente_id"]),
-        )
+    if "cajas" in request.form:
+        cajas_raw = request.form.get("cajas", "").strip()
+        cajas_final = None
+        if resultado == "completada" and cajas_raw:
+            try:
+                cajas_final = max(0, int(cajas_raw))
+            except ValueError:
+                cajas_final = None
+        campo_cajas = "cajas_reales_extra" if resolviendo_extra else "cajas_reales"
+        db.execute(f"UPDATE paradas SET {campo_cajas} = ? WHERE id = ?", (cajas_final, parada_id))
 
-    cajas_raw = request.form.get("cajas", "").strip()
-    cajas_final = None
-    if estado == "completada" and cajas_raw:
-        try:
-            cajas_final = max(0, int(cajas_raw))
-        except ValueError:
-            cajas_final = None
-    db.execute("UPDATE paradas SET cajas_reales = ? WHERE id = ?", (cajas_final, parada_id))
-
-    # tipo_redistribucion NULL = la solicitud "propia" del paciente (su bote de bienvenida o su
-    # recolección normal de PVC): al completarse cualquiera de las dos, vuelve a 'pendiente' con
-    # el temporizador de espera reiniciado (DIAS_ESPERA_PRIMERA_RECOLECCION), porque en ambos
-    # casos lo que sigue es una futura recolección de material. tipo_redistribucion 'material'/
-    # 'donar' = una solicitud puntual de cajas (recibir o donar): al completarse ya no falta
-    # nada más, así que se marca 'recolectada' (terminal) y desaparece de las listas de admin.
-    botes_entregados = 0
-    fecha_reinicio = None
-    if estado == "completada":
-        if parada["tipo_redistribucion"] is None:
-            solicitud_estado = "pendiente"
-            fecha_reinicio = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            if es_entrega:
-                botes_entregados += 1
-        else:
-            solicitud_estado = "recolectada"
-    elif estado == "ausente":
-        solicitud_estado = "pendiente_entrega" if es_entrega else "pendiente"
-    else:
-        solicitud_estado = "incidencia"
-    if fecha_reinicio:
-        db.execute(
-            "UPDATE solicitudes SET estado = ?, fecha_reinicio_espera = ? WHERE id = ?",
-            (solicitud_estado, fecha_reinicio, parada["solicitud_id"]),
+    if resolviendo_extra:
+        _resolver_resultado_parte(
+            db, parada["solicitud_extra_id"], parada["tipo_extra"], parada["tipo_redistribucion_extra"],
+            parada["material_cajas_extra"], parada["cantidad_cajas_extra"], resultado, parada_id, " (extra)",
         )
     else:
-        db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (solicitud_estado, parada["solicitud_id"]))
+        _resolver_resultado_parte(
+            db, parada["solicitud_id"], parada["tipo"], parada["tipo_redistribucion"],
+            parada["material_cajas"], parada["cantidad_cajas"], resultado, parada_id, "",
+        )
 
-    if parada["solicitud_extra_id"]:
-        es_entrega_extra = parada["tipo_extra"] == "entrega"
-        fecha_reinicio_extra = None
-        if estado == "completada":
-            if parada["tipo_redistribucion_extra"] is None:
-                solicitud_estado_extra = "pendiente"
-                fecha_reinicio_extra = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                if es_entrega_extra:
-                    botes_entregados += 1
-            else:
-                solicitud_estado_extra = "recolectada"
-        elif estado == "ausente":
-            solicitud_estado_extra = "pendiente_entrega" if es_entrega_extra else "pendiente"
-        else:
-            solicitud_estado_extra = "incidencia"
-        if fecha_reinicio_extra:
-            db.execute(
-                "UPDATE solicitudes SET estado = ?, fecha_reinicio_espera = ? WHERE id = ?",
-                (solicitud_estado_extra, fecha_reinicio_extra, parada["solicitud_extra_id"]),
-            )
-        else:
-            db.execute(
-                "UPDATE solicitudes SET estado = ? WHERE id = ?",
-                (solicitud_estado_extra, parada["solicitud_extra_id"]),
-            )
+    db.execute(f"UPDATE paradas SET {campo_estado} = ? WHERE id = ?", (resultado, parada_id))
 
-    if botes_entregados:
-        registrar_movimiento_botes(db, "entrega", botes_entregados, f"Parada #{parada['id']}")
-
-    if estado == "completada":
-        if parada["tipo_redistribucion"] and parada["cantidad_cajas"]:
-            signo = 1 if parada["tipo_redistribucion"] == "donar" else -1
-            registrar_movimiento_cajas(
-                db, parada["material_cajas"], "donacion" if signo > 0 else "entrega",
-                signo * parada["cantidad_cajas"], f"Parada #{parada['id']}",
-            )
-        if parada["tipo_redistribucion_extra"] and parada["cantidad_cajas_extra"]:
-            signo = 1 if parada["tipo_redistribucion_extra"] == "donar" else -1
-            registrar_movimiento_cajas(
-                db, parada["material_cajas_extra"], "donacion" if signo > 0 else "entrega",
-                signo * parada["cantidad_cajas_extra"], f"Parada #{parada['id']} (extra)",
-            )
-
-    total_paradas = db.execute(
-        "SELECT COUNT(*) c FROM paradas WHERE ruta_id = ?", (parada["ruta_id"],)
-    ).fetchone()["c"]
     paradas_pendientes = db.execute(
-        "SELECT COUNT(*) c FROM paradas WHERE ruta_id = ? AND estado = 'pendiente'", (parada["ruta_id"],)
+        "SELECT COUNT(*) c FROM paradas WHERE ruta_id = ? AND ("
+        "  estado = 'pendiente' OR (solicitud_extra_id IS NOT NULL AND estado_extra = 'pendiente')"
+        ")",
+        (parada["ruta_id"],),
     ).fetchone()["c"]
     nuevo_estado_ruta = "completada" if paradas_pendientes == 0 else "en_curso"
     db.execute("UPDATE rutas SET estado = ? WHERE id = ?", (nuevo_estado_ruta, parada["ruta_id"]))
 
     db.commit()
-    if paradas_pendientes > 0:
+    parada_ya_resuelta = db.execute(
+        "SELECT (estado != 'pendiente') AND (solicitud_extra_id IS NULL OR estado_extra != 'pendiente') AS r "
+        "FROM paradas WHERE id = ?",
+        (parada_id,),
+    ).fetchone()["r"]
+    if parada_ya_resuelta and paradas_pendientes > 0:
         threading.Thread(
             target=_notificar_siguiente_parada, args=(parada["ruta_id"],), daemon=True
         ).start()
-    flash("Parada actualizada.", "success")
+    flash("Segunda solicitud de esta parada actualizada." if resolviendo_extra else "Parada actualizada.", "success")
     return redirect(url_for("recolector_ver_ruta", ruta_id=parada["ruta_id"]))
 
 
