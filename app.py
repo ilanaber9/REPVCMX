@@ -64,8 +64,10 @@ FACTOR_TRAFICO = 1.4
 MAX_PACIENTES_ACTIVOS = 700
 MATERIALES_PRODUCTO_TERMINADO = ["PEMOFLEX BOLSA", "PEMOFLEX MANGUERA"]
 TIPOS_CAJAS = [
-    "Máquina Baxter", "Máquina Pisa", "Manual Baxter verde",
-    "Manual Baxter amarilla", "Manual Pisa verde", "Manual Pisa amarilla",
+    f"{tipo} {marca} {color}"
+    for tipo in ("Manual", "Máquina")
+    for marca in ("Baxter", "Pisa")
+    for color in ("amarilla", "verde", "roja", "morada")
 ]
 PERSONAS_PRODUCTIVIDAD = ["Gabriela", "Paola", "Monserrat"]
 ACTIVIDADES_PRODUCTIVIDAD = ["moler", "cortar", "secar", "envasar"]
@@ -495,6 +497,7 @@ def enviar_email(destinatario, asunto, cuerpo):
     remitente = os.environ.get("SMTP_EMAIL")
     clave = os.environ.get("SMTP_APP_PASSWORD")
     if not remitente or not clave:
+        print("[enviar_email] SMTP_EMAIL/SMTP_APP_PASSWORD no están configurados — no se envió el correo.")
         return False
     msg = MIMEText(cuerpo)
     msg["Subject"] = asunto
@@ -505,7 +508,8 @@ def enviar_email(destinatario, asunto, cuerpo):
             server.login(remitente, clave)
             server.sendmail(remitente, [destinatario], msg.as_string())
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[enviar_email] Falló el envío a {destinatario}: {e}")
         return False
 
 
@@ -1152,12 +1156,19 @@ def registro():
         )
         db.commit()
         link = url_for("verificar_correo", token=token, _external=True)
-        enviar_email(
+        enviado = enviar_email(
             email, "Verifica tu correo — RE-PVC",
             f"Hola {name},\n\nGracias por registrarte en RE-PVC. Confirma tu correo entrando a este enlace:\n{link}\n\n"
             "Si tú no creaste esta cuenta, ignora este correo.",
         )
-        flash("Cuenta creada. Revisa tu correo para verificarla antes de continuar.", "success")
+        if enviado:
+            flash("Cuenta creada. Revisa tu correo para verificarla antes de continuar.", "success")
+        else:
+            flash(
+                "Cuenta creada, pero no pudimos enviarte el correo de verificación en este momento. "
+                "Inicia sesión y usa la opción de reenviar el correo desde tu cuenta.",
+                "error",
+            )
         return redirect(url_for("login"))
     return render_template("registro.html")
 
@@ -1192,11 +1203,14 @@ def cliente_verificar_correo(user):
         db.execute("UPDATE users SET verificacion_token = ? WHERE id = ?", (token, user["id"]))
         db.commit()
         link = url_for("verificar_correo", token=token, _external=True)
-        enviar_email(
+        enviado = enviar_email(
             user["email"], "Verifica tu correo — RE-PVC",
             f"Hola {user['name']},\n\nConfirma tu correo entrando a este enlace:\n{link}",
         )
-        flash("Te reenviamos el correo de verificación.", "success")
+        if enviado:
+            flash("Te reenviamos el correo de verificación.", "success")
+        else:
+            flash("No pudimos enviar el correo en este momento. Intenta de nuevo en unos minutos.", "error")
     return render_template("cliente_verificar_correo.html")
 
 
@@ -1454,12 +1468,16 @@ def cliente_dashboard(user):
     cajas_donadas_total = sum(r["total"] for r in cajas_donadas)
     cajas_recibidas_total = sum(r["total"] for r in cajas_recibidas)
 
+    solicitud_principal = next((s for s in solicitudes if not s["tipo_redistribucion"]), None)
+
     return render_template(
         "cliente_dashboard.html", solicitudes=solicitudes,
+        solicitud_principal=solicitud_principal,
         nef_publicaciones=nef_publicaciones, nef_confirmados=nef_confirmados,
         admin_videos=admin_videos,
         cajas_donadas=cajas_donadas, cajas_recibidas=cajas_recibidas,
         cajas_donadas_total=cajas_donadas_total, cajas_recibidas_total=cajas_recibidas_total,
+        tipos_cajas=TIPOS_CAJAS,
     )
 
 
@@ -1579,6 +1597,27 @@ def cliente_nueva_solicitud(user):
             flash("Solicitud registrada. Por ahora no tenemos existencia suficiente — te avisaremos en cuanto haya.", "success")
     else:
         flash("Solicitud de recolección creada.", "success")
+    return redirect(url_for("cliente_dashboard", tab="notificaciones"))
+
+
+@app.route("/cliente/regresar-bote", methods=["POST"])
+@login_required("cliente")
+def cliente_regresar_bote(user):
+    db = get_db()
+    sol = db.execute(
+        "SELECT id, bote_a_devolver FROM solicitudes WHERE cliente_id = ? AND tipo_redistribucion IS NULL "
+        "ORDER BY created_at DESC LIMIT 1",
+        (user["id"],),
+    ).fetchone()
+    if sol is None:
+        flash("No encontramos tu solicitud — contáctanos directamente.", "error")
+    elif sol["bote_a_devolver"]:
+        flash("Ya habíamos registrado que vas a regresar el bote — lo recogeremos en tu próxima ruta.", "success")
+    else:
+        db.execute("UPDATE solicitudes SET bote_a_devolver = 1 WHERE id = ?", (sol["id"],))
+        crear_notificacion_admin(db, user["id"], f"'{user['name']}' avisó que va a regresar el bote.")
+        db.commit()
+        flash("Listo, marcamos que vas a regresar el bote — lo recogeremos en tu próxima ruta.", "success")
     return redirect(url_for("cliente_dashboard", tab="notificaciones"))
 
 

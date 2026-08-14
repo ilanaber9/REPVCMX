@@ -60,7 +60,14 @@
         <td>
           {% if not s['parada_id'] %}—
           {% elif s['confirmado_paciente'] == 'si' %}
-          <span class="badge entregado">Confirmaste: sí puedo</span>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span class="badge entregado">Confirmaste: sí puedo</span>
+            <form method="post" action="{{ url_for('cliente_confirmar_parada', parada_id=s['parada_id']) }}"
+                  onsubmit="return confirm('¿Cancelar la recolección? Se quitará de la ruta de hoy y se reprogramará para otro día.');">
+              <input type="hidden" name="respuesta" value="no">
+              <button type="submit" class="small danger">Cancelar recolección</button>
+            </form>
+          </div>
           {% elif s['confirmado_paciente'] == 'no' %}
           <span class="badge incidencia">Confirmaste: no puedo</span>
           {% else %}
@@ -83,6 +90,23 @@
     <p class="empty">Aún no tienes solicitudes.</p>
     {% endif %}
   </div>
+
+  {% if solicitud_principal %}
+  <div class="card" style="margin-top:14px;">
+    <h1 style="margin:0;">¿Vas a regresar el bote?</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Si ya terminaste de usar tu bote y necesitas que lo recolectemos, avísanos aquí — lo recogeremos en tu próxima ruta.
+    </p>
+    {% if solicitud_principal['bote_a_devolver'] %}
+    <span class="badge incidencia" style="margin-top:10px; display:inline-block;">🪣 Ya avisaste — lo recogeremos en tu próxima ruta</span>
+    {% else %}
+    <form method="post" action="{{ url_for('cliente_regresar_bote') }}" style="margin-top:10px;"
+          onsubmit="return confirm('¿Confirmas que necesitas regresar el bote? Lo recogeremos en tu próxima ruta.');">
+      <button type="submit" class="secondary">🪣 Necesito regresar el bote</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 
 <div class="tab-panel" data-tab="material">
@@ -156,12 +180,9 @@
         <label>Tipo de material</label>
         <select name="material" required>
           <option value="" disabled selected>Selecciona una opción</option>
-          <option value="Máquina Baxter">Máquina Baxter</option>
-          <option value="Máquina Pisa">Máquina Pisa</option>
-          <option value="Manual Baxter verde">Manual Baxter verde</option>
-          <option value="Manual Baxter amarilla">Manual Baxter amarilla</option>
-          <option value="Manual Pisa verde">Manual Pisa verde</option>
-          <option value="Manual Pisa amarilla">Manual Pisa amarilla</option>
+          {% for tipo_caja in tipos_cajas %}
+          <option value="{{ tipo_caja }}">{{ tipo_caja }}</option>
+          {% endfor %}
         </select>
         <label>Cantidad de cajas (máximo 10 por solicitud)</label>
         <input type="number" name="cantidad_cajas" min="1" max="10" required>
@@ -179,12 +200,9 @@
         <label>Tipo de material</label>
         <select name="material" required>
           <option value="" disabled selected>Selecciona una opción</option>
-          <option value="Máquina Baxter">Máquina Baxter</option>
-          <option value="Máquina Pisa">Máquina Pisa</option>
-          <option value="Manual Baxter verde">Manual Baxter verde</option>
-          <option value="Manual Baxter amarilla">Manual Baxter amarilla</option>
-          <option value="Manual Pisa verde">Manual Pisa verde</option>
-          <option value="Manual Pisa amarilla">Manual Pisa amarilla</option>
+          {% for tipo_caja in tipos_cajas %}
+          <option value="{{ tipo_caja }}">{{ tipo_caja }}</option>
+          {% endfor %}
         </select>
         <label>Cantidad de cajas (máximo 10 por solicitud)</label>
         <input type="number" name="cantidad_cajas" min="1" max="10" required>
