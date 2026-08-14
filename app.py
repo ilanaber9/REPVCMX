@@ -805,6 +805,9 @@ def close_db(exception=None):
         db.close()
 
 
+SEED_SOLICITUDES_PATH = os.path.join(BASE_DIR, "seed_solicitudes.json")
+
+
 def init_db():
     is_new = not os.path.exists(DB_PATH)
     db = sqlite3.connect(DB_PATH)
@@ -815,6 +818,16 @@ def init_db():
             "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
             ("Administrador", "admin@rutas.local", generate_password_hash("admin123", method="pbkdf2:sha256"), "admin"),
         )
+        if os.path.exists(SEED_SOLICITUDES_PATH):
+            with open(SEED_SOLICITUDES_PATH, encoding="utf-8") as f:
+                puntos = json.load(f)
+            for p in puntos:
+                db.execute(
+                    "INSERT INTO solicitudes (nombre_contacto, direccion, material, lat, lon, zona, estado) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'pendiente')",
+                    (p["nombre_contacto"], p["direccion"], p["material"], p["lat"], p["lon"], p["zona"]),
+                )
+            print(f"Se cargaron {len(puntos)} puntos de recolección desde seed_solicitudes.json.")
         db.commit()
         print("Base de datos creada. Login admin -> admin@rutas.local / admin123")
     db.close()
