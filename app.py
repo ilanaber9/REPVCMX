@@ -3,6 +3,7 @@ import os
 import re
 import secrets
 import smtplib
+import socket
 import sqlite3
 import subprocess
 import threading
@@ -503,7 +504,16 @@ def enviar_email(destinatario, asunto, cuerpo):
     msg["Subject"] = asunto
     msg["From"] = remitente
     msg["To"] = destinatario
+    # Render no tiene salida IPv6, y smtp.gmail.com sí publica un registro AAAA — sin esto,
+    # smtplib intenta conectar por IPv6 primero y falla con "Network is unreachable".
+    # Forzamos la resolución a IPv4 solo mientras dure esta conexión.
+    getaddrinfo_original = socket.getaddrinfo
+
+    def _getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
+        return getaddrinfo_original(host, port, socket.AF_INET, type, proto, flags)
+
     try:
+        socket.getaddrinfo = _getaddrinfo_ipv4
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10) as server:
             server.login(remitente, clave)
             server.sendmail(remitente, [destinatario], msg.as_string())
@@ -511,6 +521,8 @@ def enviar_email(destinatario, asunto, cuerpo):
     except Exception as e:
         print(f"[enviar_email] Falló el envío a {destinatario}: {e}")
         return False
+    finally:
+        socket.getaddrinfo = getaddrinfo_original
 
 
 def geocodificar_direccion(direccion, limite=5, codigo_postal=None):
