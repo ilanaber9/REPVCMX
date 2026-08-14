@@ -44,8 +44,22 @@
       </div>
     </div>
 
-    <button type="submit">Terminar registro</button>
+    <button type="button" id="btn-terminar-registro">Terminar registro</button>
   </form>
+
+  <div id="confirmacion-datos" style="display:none; margin-top:16px; border-top:1px solid var(--border); padding-top:16px;">
+    <h2 style="margin-top:0;">¿Todo está correcto?</h2>
+    <p style="color:var(--muted); font-size:0.9rem;">Revisa que estos datos sean correctos antes de continuar:</p>
+    <p style="line-height:1.8;">
+      <strong>Teléfono:</strong> <span id="confirmar-telefono"></span><br>
+      <strong>Dirección:</strong> <span id="confirmar-direccion"></span><br>
+      <strong>Código postal:</strong> <span id="confirmar-cp"></span>
+    </p>
+    <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
+      <button type="button" id="btn-confirmar-si">Sí, todo correcto</button>
+      <button type="button" class="secondary" id="btn-confirmar-no">No, quiero editar</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -181,6 +195,29 @@ document.getElementById('btn-ubicacion-actual').addEventListener('click', () => 
     const lon = parseFloat(lonInput.value);
     if (!isNaN(lat) && !isNaN(lon)) ubicar(lat, lon);
   });
+});
+
+const formAlta = document.querySelector('#btn-terminar-registro').closest('form');
+const bloqueConfirmacion = document.getElementById('confirmacion-datos');
+
+document.getElementById('btn-terminar-registro').addEventListener('click', () => {
+  if (!formAlta.reportValidity()) return;
+  const telefono = document.querySelector('input[name="telefono"]').value.trim();
+  document.getElementById('confirmar-telefono').textContent = telefono ? ('+52 ' + telefono) : 'No indicado';
+  document.getElementById('confirmar-direccion').textContent = document.getElementById('paciente-direccion').value.trim();
+  document.getElementById('confirmar-cp').textContent = document.getElementById('paciente-cp').value.trim() || 'No indicado';
+  formAlta.style.display = 'none';
+  bloqueConfirmacion.style.display = 'block';
+  bloqueConfirmacion.scrollIntoView({behavior: 'smooth', block: 'start'});
+});
+
+document.getElementById('btn-confirmar-no').addEventListener('click', () => {
+  bloqueConfirmacion.style.display = 'none';
+  formAlta.style.display = 'block';
+});
+
+document.getElementById('btn-confirmar-si').addEventListener('click', () => {
+  formAlta.submit();
 });
 </script>
 {% endblock %}
