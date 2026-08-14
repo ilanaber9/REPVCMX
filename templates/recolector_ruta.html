@@ -91,7 +91,6 @@
       {% elif p['confirmado_paciente'] == 'no' %}<span class="badge incidencia">Confirmó: no puede</span>{% endif %}
       {% if p['bote_a_devolver'] %}<span class="badge incidencia">🪣 Recoger bote de regreso</span>{% endif %}<br>
       Cliente: {{ p['cliente_nombre'] }}{% if p['modalidad'] == 'compra' %} 💲{% endif %}
-      {% if p['telefono'] %}<a href="tel:{{ p['telefono']|replace(' ', '') }}" title="Llamar a {{ p['cliente_nombre'] }}" style="text-decoration:none;">📞</a>{% endif %}
       {% if p['material'] != 'PVC' and p['material_extra'] %}
       · Material: {{ p['material'] }} + {{ p['material_extra'] }}
       {% elif p['material'] != 'PVC' %}
@@ -103,6 +102,9 @@
       {% if p['notas_solicitud'] %}<br>Notas del cliente: {{ p['notas_solicitud'] }}{% endif %}
 
       <div class="estado-form" style="margin-top:8px;">
+        {% if p['telefono'] %}
+        <a class="btn small" href="tel:{{ p['telefono']|replace(' ', '') }}">📞 Llamar</a>
+        {% endif %}
         {% if p['lat'] and p['lon'] %}
         <a class="btn secondary small" target="_blank" rel="noopener"
            href="https://www.google.com/maps/dir/?api=1&destination={{ p['lat'] }},{{ p['lon'] }}">Google Maps</a>
