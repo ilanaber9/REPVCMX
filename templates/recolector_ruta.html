@@ -108,13 +108,9 @@
         {% if p['lat'] and p['lon'] %}
         <a class="btn secondary small" target="_blank" rel="noopener"
            href="https://www.google.com/maps/dir/?api=1&destination={{ p['lat'] }},{{ p['lon'] }}">Google Maps</a>
-        <a class="btn secondary small" target="_blank" rel="noopener"
-           href="https://waze.com/ul?ll={{ p['lat'] }},{{ p['lon'] }}&navigate=yes">Waze</a>
         {% else %}
         <a class="btn secondary small" target="_blank" rel="noopener"
            href="https://www.google.com/maps/dir/?api=1&destination={{ p['direccion'] | urlencode }}">Google Maps</a>
-        <a class="btn secondary small" target="_blank" rel="noopener"
-           href="https://waze.com/ul?q={{ p['direccion'] | urlencode }}&navigate=yes">Waze</a>
         {% endif %}
         {% if p['bote_a_devolver'] %}
         <form class="inline" method="post" action="{{ url_for('recolector_bote_devuelto', parada_id=p['id']) }}">
