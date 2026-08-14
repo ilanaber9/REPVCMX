@@ -37,6 +37,21 @@
   </p>
   {% endif %}
 
+  {% if ruta['hora_inicio_real'] and not ruta['hora_fin_real'] %}
+  <details style="margin-top:8px;">
+    <summary style="cursor:pointer; color:var(--danger); font-weight:600; font-size:0.9rem;">🚨 Suspender ruta (llanta ponchada, camioneta descompuesta, no me siento bien, etc.)</summary>
+    <form method="post" action="{{ url_for('recolector_suspender_ruta', ruta_id=ruta['id']) }}"
+          onsubmit="return confirm('¿Suspender la ruta? Se avisará a los pacientes que todavía faltan que se reprogramará su recolección. Esta acción no se puede deshacer.');"
+          style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+      <label style="flex:1; min-width:200px;">
+        ¿Qué pasó? (opcional)
+        <input type="text" name="motivo" placeholder="Ej. se ponchó una llanta">
+      </label>
+      <button type="submit" class="danger small">Suspender ruta</button>
+    </form>
+  </details>
+  {% endif %}
+
   {% if estimado %}
   <p style="color:var(--muted); font-size:0.88rem;">
     Tiempo estimado ida y vuelta desde Filiberto Gómez 279: <strong>{{ estimado['duracion'] }}</strong> ({{ estimado['distancia_km'] }} km)

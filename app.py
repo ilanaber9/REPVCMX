@@ -3137,6 +3137,82 @@ def recolector_finalizar_ruta(user, ruta_id):
     return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
 
 
+@app.route("/recolector/rutas/<int:ruta_id>/suspender", methods=["POST"])
+@login_required("recolector")
+def recolector_suspender_ruta(user, ruta_id):
+    db = get_db()
+    ruta = db.execute(
+        "SELECT * FROM rutas WHERE id = ? AND recolector_id = ?", (ruta_id, user["id"])
+    ).fetchone()
+    if ruta is None:
+        flash("Esa ruta no está asignada a tu cuenta.", "error")
+        return redirect(url_for("recolector_dashboard"))
+    if not ruta["hora_inicio_real"]:
+        flash("Primero tienes que iniciar la ruta.", "error")
+        return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
+    if ruta["hora_fin_real"]:
+        flash("Esta ruta ya se había finalizado.", "error")
+        return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
+
+    motivo = request.form.get("motivo", "").strip()
+    nota = f"Ruta suspendida: {motivo}" if motivo else "Ruta suspendida por una eventualidad."
+
+    paradas = db.execute(
+        "SELECT p.*, s.cliente_id AS cliente_id, s2.cliente_id AS cliente_id_extra "
+        "FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+        "LEFT JOIN solicitudes s2 ON s2.id = p.solicitud_extra_id "
+        "WHERE p.ruta_id = ?",
+        (ruta_id,),
+    ).fetchall()
+
+    afectados = {}
+    for p in paradas:
+        if p["estado"] == "pendiente":
+            estado_previo = "pendiente_entrega" if p["tipo"] == "entrega" else "pendiente"
+            db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo, p["solicitud_id"]))
+            db.execute("UPDATE paradas SET estado = 'incidencia', notas = ? WHERE id = ?", (nota, p["id"]))
+            if p["cliente_id"]:
+                u = db.execute("SELECT name, email FROM users WHERE id = ?", (p["cliente_id"],)).fetchone()
+                if u:
+                    afectados[u["email"]] = u["name"]
+        if p["solicitud_extra_id"] and p["estado_extra"] == "pendiente":
+            estado_previo_extra = "pendiente_entrega" if p["tipo_extra"] == "entrega" else "pendiente"
+            db.execute(
+                "UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo_extra, p["solicitud_extra_id"])
+            )
+            db.execute("UPDATE paradas SET estado_extra = 'incidencia' WHERE id = ?", (p["id"],))
+            if p["cliente_id_extra"]:
+                u2 = db.execute("SELECT name, email FROM users WHERE id = ?", (p["cliente_id_extra"],)).fetchone()
+                if u2:
+                    afectados[u2["email"]] = u2["name"]
+
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute("UPDATE rutas SET hora_fin_real = ?, estado = 'completada' WHERE id = ?", (ahora, ruta_id))
+    crear_notificacion_admin(
+        db, None,
+        f"El recolector '{user['name']}' suspendió la ruta '{ruta['nombre']}' — {nota} "
+        f"({len(afectados)} paciente(s) afectado(s), quedaron disponibles para reprogramar).",
+    )
+    db.commit()
+
+    for email, nombre in afectados.items():
+        enviar_email(
+            email, "Suspendimos la ruta de hoy — RE-PVC",
+            f"Hola {nombre},\n\n"
+            "Lamentamos informarte que la ruta de recolección de hoy tuvo que suspenderse por una "
+            "eventualidad. Te ofrecemos una disculpa por las molestias.\n\n"
+            "Vamos a reprogramar tu recolección lo antes posible y te avisaremos en cuanto quede lista "
+            "una nueva fecha.\n\nGracias por tu paciencia.",
+        )
+
+    flash(
+        f"Ruta suspendida. Se avisó a {len(afectados)} paciente(s) — sus recolecciones quedaron "
+        "disponibles para reprogramar.",
+        "success",
+    )
+    return redirect(url_for("recolector_dashboard"))
+
+
 def _resolver_resultado_parte(db, solicitud_id, tipo, tipo_redistribucion, material, cantidad_cajas,
                                resultado, parada_id, sufijo_notas=""):
     """Aplica el resultado (completada/ausente/incidencia) que el recolector reportó para UNA
