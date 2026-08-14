@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Mis rutas{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Mis rutas asignadas</h1>
+  {% if rutas %}
+  <table>
+    <tr><th>Nombre</th><th>Fecha</th><th>Progreso</th><th>Estado</th><th></th></tr>
+    {% for r in rutas %}
+    <tr>
+      <td>{{ r['nombre'] }}</td>
+      <td>{{ r['fecha'] }}</td>
+      <td>{{ r['paradas_hechas'] }}/{{ r['total_paradas'] }}</td>
+      <td><span class="badge {{ r['estado'] }}">{{ r['estado'] }}</span></td>
+      <td><a class="btn small" href="{{ url_for('recolector_ver_ruta', ruta_id=r['id']) }}">Ver</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="empty">No tienes rutas asignadas todavía.</p>
+  {% endif %}
+</div>
+{% endblock %}

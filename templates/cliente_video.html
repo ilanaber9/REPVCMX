@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Video de tu tratamiento{% endblock %}
+{% block content %}
+<div class="card" style="max-width:520px; margin:40px auto;">
+  <h1>Video de tu tratamiento</h1>
+  <p style="color:var(--muted); font-size:0.9rem;">
+    Este video te explica cómo preparar el material para que podamos reciclarlo.
+  </p>
+  <video controls preload="metadata" style="width:100%; border-radius:8px; margin-top:10px; background:#000;">
+    <source src="{{ url_for('static', filename='videos/' + video) }}">
+  </video>
+  <a class="btn secondary" href="{{ url_for('static', filename='videos/' + video) }}" download style="display:inline-block; margin-top:10px;">
+    Descargar video
+  </a>
+  <a class="btn secondary" href="{{ url_for('cliente_alta') }}" style="display:inline-block; margin-top:20px;">Continuar</a>
+</div>
+{% endblock %}

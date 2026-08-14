@@ -1,0 +1,1447 @@
+{% extends "base.html" %}
+{% block title %}Panel de administración{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+{% endblock %}
+
+{% macro ruta_card(r) %}
+{% set pct = ((r['paradas_hechas'] / r['total_paradas'] * 100) | round | int) if r['total_paradas'] else 0 %}
+<div class="ruta-hoy">
+  <div class="ruta-hoy-top">
+    <strong>{{ r['nombre'] }}</strong>
+    <span class="badge {{ r['estado'] }}">{{ r['estado'] }}</span>
+  </div>
+  <div style="color:var(--muted); font-size:0.88rem; margin-top:4px;">
+    {{ r['fecha'] }} · Recolector: {{ r['recolector_nombre'] or 'sin asignar' }} · {{ r['paradas_hechas'] }}/{{ r['total_paradas'] }} paradas ({{ pct }}%)
+    {% if r['estimado'] %} · Tiempo estimado: {{ r['estimado']['duracion'] }} ({{ r['estimado']['distancia_km'] }} km){% endif %}
+  </div>
+  {% set sin_responder = r['total_paradas'] - r['confirmadas_si'] - r['confirmadas_no'] %}
+  <div style="font-size:0.85rem; margin-top:6px;">
+    <span style="color:var(--green-dark);">✅ {{ r['confirmadas_si'] }} confirmó</span> ·
+    <span style="color:var(--danger);">❌ {{ r['confirmadas_no'] }} rechazó</span> ·
+    <span style="color:var(--muted);">⏳ {{ sin_responder }} sin responder</span>
+  </div>
+  <div class="progress-track"><div class="progress-fill" style="width:{{ pct }}%;"></div></div>
+  <div style="display:flex; gap:8px; margin-top:10px;">
+    <a class="btn secondary small" href="{{ url_for('admin_ver_ruta', ruta_id=r['id']) }}">Ver detalle</a>
+    <form class="inline" method="post" action="{{ url_for('admin_eliminar_ruta', ruta_id=r['id']) }}"
+          onsubmit="return confirm('¿Eliminar la ruta \'{{ r['nombre'] }}\' de la planeación? Las paradas aún no atendidas volverán a quedar pendientes.');">
+      <button class="small danger" type="submit">Eliminar</button>
+    </form>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro ruta_finalizada_card(r) %}
+<div class="ruta-hoy">
+  <div class="ruta-hoy-top">
+    <strong>{{ r['nombre'] }}</strong>
+    <span class="badge completada">completada</span>
+  </div>
+  <div style="color:var(--muted); font-size:0.88rem; margin-top:4px;">
+    {{ r['fecha'] }} · Recolector: {{ r['recolector_nombre'] or 'sin asignar' }} · {{ r['paradas_hechas'] }}/{{ r['total_paradas'] }} paradas
+    {% if r['tiempo_real'] %} · Tiempo real: {{ r['tiempo_real'] }}{% endif %}
+    {% if r['estimado'] %} · {{ r['estimado']['distancia_km'] }} km recorridos{% endif %}
+    {% if r['kg_total'] %} · {{ "%.1f"|format(r['kg_total']) }} kg recolectados{% endif %}
+  </div>
+  <div style="margin-top:10px;">
+    <a class="btn secondary small" href="{{ url_for('admin_ver_ruta', ruta_id=r['id']) }}">Ver detalle</a>
+  </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+
+<div class="tabs">
+  <button type="button" class="tab-btn" data-tab="pacientes">Pacientes{% if lista_espera %} ({{ lista_espera|length }} en espera){% endif %}</button>
+  <button type="button" class="tab-btn" data-tab="rutas">Rutas</button>
+  <button type="button" class="tab-btn" data-tab="solicitudes">Solicitudes pendientes</button>
+  <button type="button" class="tab-btn" data-tab="paciente">Agregar paciente</button>
+  <button type="button" class="tab-btn" data-tab="recolectores">Alta y baja de cuentas</button>
+  <button type="button" class="tab-btn" data-tab="notificaciones">Notificaciones{% if notificaciones_sin_leer %} ({{ notificaciones_sin_leer }}){% endif %}</button>
+  <button type="button" class="tab-btn" data-tab="dinero">Dinero</button>
+  <button type="button" class="tab-btn" data-tab="kg">Kg recolectados</button>
+  <button type="button" class="tab-btn" data-tab="videos">Videos</button>
+  <button type="button" class="tab-btn" data-tab="inventarios">Inventarios</button>
+  <button type="button" class="tab-btn" data-tab="productividad">Productividad del día</button>
+  <button type="button" class="tab-btn" data-tab="vacaciones">Vacaciones</button>
+</div>
+
+<div class="tab-panel" data-tab="rutas">
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+      <h1 style="margin:0;">Rutas de hoy ({{ hoy }})</h1>
+      <div style="display:flex; gap:8px;">
+        <a class="btn secondary small" href="{{ url_for('admin_rutas_masivas') }}">Crear rutas por zona</a>
+        <a class="btn secondary small" href="{{ url_for('admin_mapa') }}">Ver mapa completo</a>
+      </div>
+    </div>
+    {% if rutas_hoy %}
+    {% for r in rutas_hoy %}
+    {{ ruta_card(r) }}
+    {% endfor %}
+    {% else %}
+    <p class="empty">No hay rutas programadas para hoy.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0;">Todas las rutas</h2>
+    {% if rutas %}
+    {% for r in rutas %}
+    {{ ruta_card(r) }}
+    {% endfor %}
+    {% else %}
+    <p class="empty">Aún no hay rutas creadas.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0;">Crear ruta con lo seleccionado</h2>
+    <p style="color:var(--muted); font-size:0.85rem;">
+      Marca solicitudes en la pestaña "Solicitudes pendientes" y arma la ruta con esos datos aquí.
+    </p>
+    <label>Nombre de la ruta</label>
+    <input type="text" name="nombre" placeholder="Ruta Zona Norte" form="form-crear-ruta-manual" required>
+    <label>Fecha</label>
+    <input type="date" name="fecha" form="form-crear-ruta-manual" required>
+    <label>Hora de salida (para avisarle a los pacientes)</label>
+    <input type="time" name="hora_salida" value="08:00" form="form-crear-ruta-manual" required style="max-width:150px;">
+    <label>Recolector asignado</label>
+    <select name="recolector_id" form="form-crear-ruta-manual" required>
+      <option value="" disabled selected>Selecciona un recolector</option>
+      {% for r in recolectores %}
+      <option value="{{ r['id'] }}">{{ r['name'] }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" form="form-crear-ruta-manual">Crear ruta</button>
+    {% if not recolectores %}
+    <p class="empty">Primero crea al menos un recolector en la pestaña "Alta y baja de cuentas".</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0;">Rutas finalizadas</h2>
+    <p style="color:var(--muted); font-size:0.85rem;">Historial de rutas que ya se completaron, con su tiempo real y material recolectado.</p>
+    {% if rutas_finalizadas %}
+    {% for r in rutas_finalizadas %}
+    {{ ruta_finalizada_card(r) }}
+    {% endfor %}
+    {% else %}
+    <p class="empty">Aún no hay rutas finalizadas.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="solicitudes">
+  <div class="card">
+    <h1 style="margin:0;">Solicitudes pendientes</h1>
+
+    <form method="post" action="{{ url_for('admin_nueva_ruta') }}" id="form-crear-ruta-manual">
+      <h2 style="margin-top:20px;">Solicitudes de clientes</h2>
+      {% if pendientes %}
+      <table>
+        <tr><th></th><th>Cliente</th><th>Dirección</th><th>Solicitud</th><th>Material</th><th>Cajas</th><th>Notas</th></tr>
+        {% for s in pendientes %}
+        <tr>
+          <td><input type="checkbox" name="solicitud_ids" value="{{ s['id'] }}"></td>
+          <td>{{ s['cliente_nombre'] }}</td>
+          <td>{{ s['direccion'] }}</td>
+          <td>
+            {% if s['tipo_redistribucion'] == 'donar' %}<span class="badge programada">Donar</span>
+            {% elif s['tipo_redistribucion'] == 'material' %}<span class="badge pendiente_entrega">Recibir</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ s['material'] if s['material'] != 'PVC' else '—' }}</td>
+          <td>{{ s['cantidad_cajas'] or '—' }}</td>
+          <td>{{ s['notas'] or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="empty">No hay solicitudes de clientes pendientes.</p>
+      {% endif %}
+
+      <h2 style="margin-top:24px;">Pendientes de entrega (botes / material)</h2>
+      {% if pendientes_entrega %}
+      <table>
+        <tr><th></th><th>Paciente</th><th>Dirección</th><th>Solicitud</th><th>Modalidad</th><th>Ruta</th><th></th></tr>
+        {% for s in pendientes_entrega %}
+        <tr>
+          <td>{% if not s['ruta_programada'] %}<input type="checkbox" name="solicitud_ids" value="{{ s['id'] }}">{% endif %}</td>
+          <td>{{ s['cliente_nombre'] }}</td>
+          <td>{{ s['direccion'] }}</td>
+          <td>
+            {% if s['tipo_redistribucion'] == 'material' %}<span class="badge pendiente_entrega">Recibir cajas</span>
+            {% else %}<span class="badge programada">Bote nuevo</span>{% endif %}
+          </td>
+          <td>{{ 'Compra' if s['modalidad'] == 'compra' else 'Donación' if s['modalidad'] == 'donacion' else '—' }}</td>
+          <td>{{ s['zona'] or 'Sin asignar' }}</td>
+          <td>
+            {% if s['ruta_programada'] %}
+            <span class="badge pendiente">En ruta "{{ s['ruta_programada'] }}" — falta que el recolector confirme la entrega</span>
+            {% else %}
+            <button type="submit" class="small secondary" formnovalidate
+                    formaction="{{ url_for('admin_marcar_bote_entregado', solicitud_id=s['id']) }}" formmethod="post">
+              Marcar bote entregado
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="empty">No hay pacientes esperando entrega.</p>
+      {% endif %}
+      <p style="color:var(--muted); font-size:0.85rem; margin-top:10px;">
+        Marca lo que quieras incluir y ve a la pestaña "Rutas" para crear la ruta con lo seleccionado.
+      </p>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Recolección en RE-PVC (esperando confirmar existencia)</h2>
+    {% if recolecciones_en_sitio %}
+    <table>
+      <tr><th>Paciente</th><th>Material</th><th>Cajas</th><th></th></tr>
+      {% for s in recolecciones_en_sitio %}
+      <tr>
+        <td>{{ s['cliente_nombre'] }}</td>
+        <td>{{ s['material'] }}</td>
+        <td>{{ s['cantidad_cajas'] or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_confirmar_existencia', solicitud_id=s['id']) }}">
+            <button type="submit" class="small">Confirmar existencia</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No hay solicitudes de recolección en RE-PVC esperando confirmación.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="paciente">
+  <div class="card">
+    <h1 style="margin:0;">Agregar nuevo paciente</h1>
+    <p style="color:var(--muted); font-size:0.85rem;">Todo paciente nuevo queda pendiente de que se le entregue un bote.</p>
+    <form method="post" action="{{ url_for('admin_nuevo_paciente') }}">
+      <label>Nombre del paciente</label>
+      <input type="text" name="nombre" required>
+
+      <div id="paciente-paso-1">
+        <h2 style="margin-top:20px;">Solicitud de tratamiento</h2>
+        <label>Edad</label>
+        <input type="number" name="edad" min="0" max="120" required>
+
+        <label>¿Máquina o manual?</label>
+        <select name="tipo_maquina" required>
+          <option value="" disabled selected>Selecciona una opción</option>
+          <option value="maquina">Máquina</option>
+          <option value="manual">Manual</option>
+        </select>
+
+        <label>Marca</label>
+        <select name="marca" required>
+          <option value="" disabled selected>Selecciona una opción</option>
+          <option value="baxter">Baxter</option>
+          <option value="pisa">Pisa</option>
+        </select>
+
+        <label>Frecuencia de tratamiento por semana</label>
+        <input type="number" name="frecuencia_semana" min="1" max="30" required>
+
+        <label>Causa de la enfermedad renal</label>
+        <select name="causa_enfermedad" required>
+          <option value="" disabled selected>Selecciona una opción</option>
+          <option value="diabetes">Diabetes</option>
+          <option value="hipertension">Hipertensión</option>
+          <option value="autoinmune">Enfermedad autoinmune</option>
+          <option value="desconocida">Desconocida</option>
+        </select>
+
+        <button type="button" id="btn-paciente-siguiente">Siguiente</button>
+      </div>
+
+      <div id="paciente-paso-2" style="display:none;">
+        <h2 style="margin-top:20px;">Datos de contacto</h2>
+        <label>Teléfono</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span style="padding:9px 10px; border:1px solid var(--border); border-radius:8px; color:var(--muted); background:#f5f5f5;">+52</span>
+          <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="10" pattern="[0-9 ]*" style="flex:1;">
+        </div>
+
+        <label>Dirección</label>
+        <input type="text" id="paciente-direccion" name="direccion" required>
+        <label>Código postal</label>
+        <input type="text" id="paciente-cp" name="codigo_postal" maxlength="5" pattern="[0-9]*" inputmode="numeric" style="max-width:160px;">
+        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+          <button type="button" class="small secondary" id="btn-buscar-direccion">Buscar en el mapa</button>
+          <a class="btn secondary small" id="link-google-maps" href="#" target="_blank" rel="noopener">Ver en Google Maps</a>
+        </div>
+        <p id="geocodificar-estado" style="font-size:0.8rem; color:var(--muted); margin:6px 0 0;">
+          Busca la dirección y ajusta el pin si no cae en el lugar correcto, o haz clic en el mapa para marcarlo tú mismo.
+        </p>
+        <div id="resultados-direccion" style="margin-top:8px;"></div>
+        <div id="mapa-paciente" style="height:280px; border-radius:8px; margin-top:8px;"></div>
+
+        <div style="display:flex; gap:10px; margin-top:10px;">
+          <div style="flex:1;">
+            <label>Latitud (opcional)</label>
+            <input type="text" id="paciente-lat" name="lat" placeholder="19.xxxxxxx">
+          </div>
+          <div style="flex:1;">
+            <label>Longitud (opcional)</label>
+            <input type="text" id="paciente-lon" name="lon" placeholder="-99.xxxxxxx">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button type="button" class="secondary" id="btn-paciente-atras">&larr; Atrás</button>
+          <button type="submit">Agregar paciente</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  const mapaPaciente = L.map('mapa-paciente').setView([19.35, -99.15], 10);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+  }).addTo(mapaPaciente);
+  window.invalidarMapaPaciente = () => mapaPaciente.invalidateSize();
+
+  const latInput = document.getElementById('paciente-lat');
+  const lonInput = document.getElementById('paciente-lon');
+  const linkGoogle = document.getElementById('link-google-maps');
+  const estado = document.getElementById('geocodificar-estado');
+  let marcador = null;
+
+  function ubicar(lat, lon, mover) {
+    const ll = [lat, lon];
+    if (!marcador) {
+      marcador = L.marker(ll, {draggable: true}).addTo(mapaPaciente);
+      marcador.on('dragend', () => {
+        const p = marcador.getLatLng();
+        actualizarCoords(p.lat, p.lng);
+      });
+    } else {
+      marcador.setLatLng(ll);
+    }
+    if (mover !== false) mapaPaciente.setView(ll, 16);
+    actualizarCoords(lat, lon);
+  }
+
+  function actualizarCoords(lat, lon) {
+    latInput.value = lat.toFixed(7);
+    lonInput.value = lon.toFixed(7);
+    linkGoogle.href = 'https://www.google.com/maps?q=' + lat + ',' + lon;
+  }
+
+  mapaPaciente.on('click', (e) => ubicar(e.latlng.lat, e.latlng.lng, false));
+
+  const resultadosDiv = document.getElementById('resultados-direccion');
+
+  function mostrarResultados(resultados) {
+    resultadosDiv.innerHTML = '';
+    if (resultados.length === 1) {
+      ubicar(resultados[0].lat, resultados[0].lon);
+      estado.textContent = 'Ubicación encontrada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
+      return;
+    }
+    estado.textContent = 'Encontramos varios lugares que podrían coincidir — elige el correcto:';
+    resultados.forEach((r) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'small secondary';
+      btn.style.display = 'block';
+      btn.style.width = '100%';
+      btn.style.textAlign = 'left';
+      btn.style.marginTop = '6px';
+      btn.textContent = r.etiqueta;
+      btn.addEventListener('click', () => {
+        ubicar(r.lat, r.lon);
+        resultadosDiv.innerHTML = '';
+        estado.textContent = 'Ubicación seleccionada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
+      });
+      resultadosDiv.appendChild(btn);
+    });
+  }
+
+  document.getElementById('btn-buscar-direccion').addEventListener('click', async () => {
+    const direccion = document.getElementById('paciente-direccion').value.trim();
+    if (!direccion) {
+      estado.textContent = 'Escribe una dirección primero.';
+      return;
+    }
+    const cp = document.getElementById('paciente-cp').value.trim();
+    linkGoogle.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion);
+    estado.textContent = 'Buscando…';
+    resultadosDiv.innerHTML = '';
+    try {
+      let url = '/admin/geocodificar?direccion=' + encodeURIComponent(direccion);
+      if (cp) url += '&cp=' + encodeURIComponent(cp);
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'No encontrado');
+      mostrarResultados(data.resultados);
+    } catch (e) {
+      estado.textContent = e.message + ' Haz clic en el mapa para marcar la ubicación exacta, o revisa en Google Maps.';
+    }
+  });
+
+  [latInput, lonInput].forEach((input) => {
+    input.addEventListener('change', () => {
+      const lat = parseFloat(latInput.value);
+      const lon = parseFloat(lonInput.value);
+      if (!isNaN(lat) && !isNaN(lon)) ubicar(lat, lon);
+    });
+  });
+
+  document.getElementById('btn-paciente-siguiente').addEventListener('click', () => {
+    const paso1 = document.getElementById('paciente-paso-1');
+    const primerInvalido = Array.from(paso1.querySelectorAll('[required]')).find((el) => !el.checkValidity());
+    if (primerInvalido) {
+      primerInvalido.reportValidity();
+      return;
+    }
+    paso1.style.display = 'none';
+    document.getElementById('paciente-paso-2').style.display = 'block';
+    setTimeout(() => window.invalidarMapaPaciente(), 0);
+  });
+  document.getElementById('btn-paciente-atras').addEventListener('click', () => {
+    document.getElementById('paciente-paso-2').style.display = 'none';
+    document.getElementById('paciente-paso-1').style.display = 'block';
+  });
+})();
+</script>
+
+<div class="tab-panel" data-tab="recolectores">
+  <div class="card">
+    <h1 style="margin:0;">Crear cuenta de recolector</h1>
+    <form method="post" action="{{ url_for('admin_nuevo_recolector') }}">
+      <label>Nombre</label>
+      <input type="text" name="name" required>
+      <label>Correo</label>
+      <input type="email" name="email" required>
+      <label>Contraseña</label>
+      <input type="password" name="password" required minlength="4">
+      <button type="submit">Crear recolector</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Recolectores activos</h2>
+    {% if recolectores %}
+    <ul class="checklist">
+      {% for r in recolectores %}
+      <li>
+        <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
+        <form class="inline" method="post" action="{{ url_for('admin_eliminar_recolector', user_id=r['id']) }}"
+              style="margin-top:8px;"
+              onsubmit="return confirm('¿Dar de baja a \'{{ r['name'] }}\'? No podrá volver a entrar.');">
+          <button type="submit" class="small danger">Dar de baja</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Aún no hay recolectores.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h1 style="margin:0;">Crear cuenta de NEF</h1>
+    <p style="color:var(--muted); font-size:0.85rem;">Con esta cuenta, NEF puede entrar y publicar información, videos y eventos para los pacientes.</p>
+    <form method="post" action="{{ url_for('admin_nuevo_nef') }}">
+      <label>Nombre</label>
+      <input type="text" name="name" required>
+      <label>Correo</label>
+      <input type="email" name="email" required>
+      <label>Contraseña</label>
+      <input type="password" name="password" required minlength="4">
+      <button type="submit">Crear cuenta de NEF</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Cuentas de NEF activas</h2>
+    {% if cuentas_nef %}
+    <ul class="checklist">
+      {% for r in cuentas_nef %}
+      <li>
+        <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
+        <form class="inline" method="post" action="{{ url_for('admin_eliminar_nef', user_id=r['id']) }}"
+              style="margin-top:8px;"
+              onsubmit="return confirm('¿Dar de baja la cuenta de NEF \'{{ r['name'] }}\'? No podrá volver a entrar.');">
+          <button type="submit" class="small danger">Dar de baja</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Aún no hay cuentas de NEF.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="notificaciones">
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+      <h1 style="margin:0;">Notificaciones</h1>
+      {% if notificaciones_sin_leer %}
+      <form method="post" action="{{ url_for('admin_marcar_todas_notificaciones_leidas') }}">
+        <button type="submit" class="small secondary">Marcar todas como leídas</button>
+      </form>
+      {% endif %}
+    </div>
+    {% if notificaciones %}
+    <ul class="checklist" style="margin-top:14px;">
+      {% for n in notificaciones %}
+      <li style="{% if n['leida'] %}opacity:0.6;{% endif %}">
+        {{ n['mensaje'] }}
+        <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">{{ n['created_at'] }}</div>
+        {% if not n['leida'] %}
+        <form class="inline" method="post" action="{{ url_for('admin_marcar_notificacion_leida', notificacion_id=n['id']) }}" style="margin-top:8px;">
+          <button type="submit" class="small secondary">Marcar como leída</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No hay notificaciones todavía.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="pacientes">
+  <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab-btn" data-subtab="lista">Lista de pacientes</button>
+    <button type="button" class="subtab-btn" data-subtab="inscritos">Pacientes inscritos</button>
+    <button type="button" class="subtab-btn" data-subtab="espera">Lista de espera{% if lista_espera %} ({{ lista_espera|length }}){% endif %}</button>
+    <button type="button" class="subtab-btn" data-subtab="pendientes_ruta">Pendientes de ruta{% if pendientes_ruta %} ({{ pendientes_ruta|length }}){% endif %}</button>
+  </div>
+
+  <div class="subtab-panel" data-subtab="inscritos">
+  <div class="card">
+    <h1 style="margin:0;">Pacientes inscritos</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Cuántos de los {{ max_pacientes_activos }} lugares activos están ocupados ahora mismo.</p>
+    <p style="font-size:2.5rem; font-weight:700; margin:14px 0 0;">{{ pacientes_activos }} <span style="font-size:1.2rem; color:var(--muted); font-weight:400;">/ {{ max_pacientes_activos }}</span></p>
+    <div class="progress-track" style="margin-top:10px;"><div class="progress-fill" style="width:{{ (pacientes_activos / max_pacientes_activos * 100) | round | int }}%;"></div></div>
+    {% if lista_espera %}
+    <p style="margin-top:14px; font-size:0.9rem;">
+      Cupo lleno — hay <strong>{{ lista_espera|length }}</strong> paciente(s) en la
+      <a href="{{ url_for('admin_dashboard', tab='espera') }}">lista de espera</a>.
+    </p>
+    {% else %}
+    <p style="margin-top:14px; color:var(--muted); font-size:0.9rem;">Quedan {{ max_pacientes_activos - pacientes_activos }} lugar(es) disponibles.</p>
+    {% endif %}
+  </div>
+  </div>
+
+  <div class="subtab-panel" data-subtab="lista">
+  <div class="card">
+    <h1 style="margin:0;">Pacientes</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Perfil de tratamiento registrado por cada paciente al ingresar a la app.
+      Cupo: <strong>{{ pacientes_activos }}/{{ max_pacientes_activos }}</strong> pacientes activos.
+    </p>
+    {% if pacientes %}
+    <div style="display:flex; justify-content:flex-end; gap:6px; margin-bottom:6px;">
+      <button type="button" class="small secondary" id="btn-pacientes-izq">&larr;</button>
+      <button type="button" class="small secondary" id="btn-pacientes-der">&rarr;</button>
+    </div>
+    <div id="tabla-pacientes" class="table-scroll">
+    <table>
+      <tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Edad</th><th>Tipo</th><th>Marca</th><th>Frecuencia/semana</th><th>Causa</th><th>Dirección</th><th>Ruta</th><th>Modalidad</th><th>Última visita</th><th>Material recolectado</th><th>Estado</th><th>Bote</th><th></th></tr>
+      {% for p in pacientes %}
+      <tr>
+        <td>{{ p['name'] }}{% if p['modalidad_actual'] == 'compra' %} 💲{% endif %}</td>
+        <td>{{ p['email'] }}</td>
+        <td>{{ p['telefono_actual'] or '—' }}</td>
+        {% if p['perfil_completo'] %}
+        <td>{{ p['edad'] }}</td>
+        <td>{{ 'Máquina' if p['tipo_maquina'] == 'maquina' else 'Manual' }}</td>
+        <td>{{ 'Baxter' if p['marca'] == 'baxter' else 'Pisa' }}</td>
+        <td>{{ p['frecuencia_semana'] }}</td>
+        <td>
+          {% if p['causa_enfermedad'] == 'diabetes' %}Diabetes
+          {% elif p['causa_enfermedad'] == 'hipertension' %}Hipertensión
+          {% elif p['causa_enfermedad'] == 'autoinmune' %}Enfermedad autoinmune
+          {% elif p['causa_enfermedad'] == 'desconocida' %}Desconocida
+          {% else %}—{% endif %}
+        </td>
+        {% else %}
+        <td colspan="5" style="color:var(--muted);">Aún no completa su perfil</td>
+        {% endif %}
+        <td>{{ p['direccion_actual'] or '—' }}</td>
+        <td>{{ p['ruta_actual'] or 'Sin ruta asignada' }}</td>
+        <td>
+          {% if p['alta_completa'] %}
+          <form method="post" action="{{ url_for('admin_actualizar_modalidad', cliente_id=p['id']) }}">
+            <select name="modalidad" onchange="this.form.submit()" style="min-width:110px;">
+              <option value="compra" {% if p['modalidad_actual'] == 'compra' %}selected{% endif %}>Compra</option>
+              <option value="donacion" {% if p['modalidad_actual'] == 'donacion' %}selected{% endif %}>Donación</option>
+            </select>
+          </form>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ p['ultima_visita'] or 'Aún no visitada' }}</td>
+        <td>{{ "%.1f"|format(p['material_recolectado_kg'] or 0) }} kg</td>
+        <td>
+          {% if p['alta_completa'] %}<span class="badge programada">Alta completa</span>
+          {% elif p['perfil_completo'] %}<span class="badge pendiente_entrega">Perfil sin alta</span>
+          {% else %}<span class="badge pendiente">Sin iniciar</span>{% endif %}
+        </td>
+        <td>
+          {% if p['solicitud_id_actual'] %}
+            {% if p['bote_a_devolver'] %}
+            <span class="badge incidencia">Por regresar</span>
+            {% else %}
+            <form method="post" action="{{ url_for('admin_marcar_bote_devolver', solicitud_id=p['solicitud_id_actual']) }}"
+                  onsubmit="return confirm('¿Marcar que \'{{ p['name'] }}\' debe regresar el bote? Aparecerá en su próxima ruta.');">
+              <button type="submit" class="small secondary">Regresar bote</button>
+            </form>
+            {% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <form method="post" action="{{ url_for('admin_eliminar_paciente', cliente_id=p['id']) }}"
+                onsubmit="return confirm('¿Eliminar a \'{{ p['name'] }}\' permanentemente del sistema? Esto borra su cuenta, sus solicitudes y su historial. No se puede deshacer.');">
+            <button class="small danger" type="submit">Eliminar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+    {% else %}
+    <p class="empty">Aún no hay pacientes registrados.</p>
+    {% endif %}
+  </div>
+</div>
+
+  <div class="subtab-panel" data-subtab="espera">
+  <div class="card">
+    <h1 style="margin:0;">Lista de espera</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Pacientes que se registraron cuando ya estábamos en el cupo máximo de {{ max_pacientes_activos }}
+      pacientes activos. En cuanto se libera un lugar (se elimina a alguien permanentemente), el que
+      lleva más tiempo aquí se activa automáticamente.
+    </p>
+    {% if lista_espera %}
+    <table>
+      <tr><th>Nombre</th><th>Dirección</th><th>Teléfono</th><th>En espera desde</th></tr>
+      {% for s in lista_espera %}
+      <tr>
+        <td>{{ s['cliente_nombre'] }}</td>
+        <td>{{ s['direccion'] }}</td>
+        <td>{{ s['telefono'] or '—' }}</td>
+        <td>{{ s['created_at'] }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No hay nadie en lista de espera.</p>
+    {% endif %}
+  </div>
+  </div>
+
+  <div class="subtab-panel" data-subtab="pendientes_ruta">
+  <div class="card">
+    <h1 style="margin:0;">Pendientes de ruta</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Pacientes que se registraron pero todavía no tenemos ninguna ruta en su zona. En cuanto armes
+      una ruta cerca de su dirección, actívalos aquí para integrarlos.
+    </p>
+    {% if pendientes_ruta %}
+    <table>
+      <tr><th>Nombre</th><th>Dirección</th><th>Teléfono</th><th>Pendiente desde</th><th></th></tr>
+      {% for s in pendientes_ruta %}
+      <tr>
+        <td>{{ s['cliente_nombre'] }}</td>
+        <td>{{ s['direccion'] }}</td>
+        <td>{{ s['telefono'] or '—' }}</td>
+        <td>{{ s['created_at'] }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_activar_pendiente_ruta', solicitud_id=s['id']) }}">
+            <button type="submit" class="small">Activar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No hay nadie pendiente de ruta.</p>
+    {% endif %}
+  </div>
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="dinero">
+  <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab-btn" data-subtab="ingreso">Ingreso</button>
+    <button type="button" class="subtab-btn" data-subtab="egreso">Egreso</button>
+    <button type="button" class="subtab-btn" data-subtab="total">Total de efectivo</button>
+  </div>
+
+  <div class="subtab-panel" data-subtab="ingreso">
+  <div class="card">
+    <h1 style="margin:0;">Ingreso</h1>
+    <form method="post" action="{{ url_for('admin_nuevo_movimiento') }}">
+      <input type="hidden" name="tipo" value="ingreso">
+      <label>Cantidad</label>
+      <input type="number" name="monto" step="0.01" min="0.01" required style="max-width:200px;">
+      <label>Motivo</label>
+      <textarea name="motivo" rows="2" required></textarea>
+      <button type="submit">Agregar ingreso</button>
+    </form>
+    {% if ingresos %}
+    <table style="margin-top:20px;">
+      <tr><th>Fecha</th><th>Cantidad</th><th>Motivo</th></tr>
+      {% for m in ingresos %}
+      <tr>
+        <td>{{ m['created_at'] }}</td>
+        <td>${{ "%.2f"|format(m['monto']) }}</td>
+        <td>{{ m['motivo'] }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay ingresos registrados.</p>
+    {% endif %}
+  </div>
+  </div>
+
+  <div class="subtab-panel" data-subtab="egreso">
+  <div class="card">
+    <h1 style="margin:0;">Egreso</h1>
+    <form method="post" action="{{ url_for('admin_nuevo_movimiento') }}">
+      <input type="hidden" name="tipo" value="egreso">
+      <label>Cantidad</label>
+      <input type="number" name="monto" step="0.01" min="0.01" required style="max-width:200px;">
+      <label>Motivo</label>
+      <textarea name="motivo" rows="2" required></textarea>
+      <button type="submit">Agregar egreso</button>
+    </form>
+    {% if egresos %}
+    <table style="margin-top:20px;">
+      <tr><th>Fecha</th><th>Cantidad</th><th>Motivo</th></tr>
+      {% for m in egresos %}
+      <tr>
+        <td>{{ m['created_at'] }}</td>
+        <td>${{ "%.2f"|format(m['monto']) }}</td>
+        <td>{{ m['motivo'] }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay egresos registrados.</p>
+    {% endif %}
+  </div>
+  </div>
+
+  <div class="subtab-panel" data-subtab="total">
+  <div class="card">
+    <h1 style="margin:0;">Total de efectivo</h1>
+    <p style="font-size:2.5rem; font-weight:700; margin:14px 0 0;">${{ "%.2f"|format(total_efectivo) }}</p>
+    <p style="color:var(--muted); font-size:0.9rem; margin-top:10px;">
+      Ingresos: <strong style="color:var(--green-dark);">${{ "%.2f"|format(total_ingresos) }}</strong>
+      · Egresos: <strong style="color:var(--danger);">${{ "%.2f"|format(total_egresos) }}</strong>
+    </p>
+  </div>
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="kg">
+  <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab-btn" data-subtab="dia">Por día</button>
+    <button type="button" class="subtab-btn" data-subtab="acumulado">Total acumulado</button>
+  </div>
+
+  <div class="subtab-panel" data-subtab="dia">
+  <div class="card">
+    <h1 style="margin:0;">Kg recolectados por día</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Se calcula con lo que los recolectores registran en cada parada de la ruta.</p>
+    {% if kg_por_dia %}
+    <table style="margin-top:20px;">
+      <tr><th>Fecha</th><th>Kg recolectados</th></tr>
+      {% for d in kg_por_dia %}
+      <tr>
+        <td>{{ d['fecha'] }}</td>
+        <td>{{ "%.1f"|format(d['kg']) }} kg</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay kg registrados.</p>
+    {% endif %}
+  </div>
+  </div>
+
+  <div class="subtab-panel" data-subtab="acumulado">
+  <div class="card">
+    <h1 style="margin:0;">Total acumulado</h1>
+    <p style="font-size:2.5rem; font-weight:700; margin:14px 0 0;">{{ "%.1f"|format(total_kg_recolectados) }} kg</p>
+    <p style="color:var(--muted); font-size:0.9rem; margin-top:10px;">Suma de todos los kg recolectados registrados por los recolectores en todas las rutas.</p>
+  </div>
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="videos">
+  <div class="card">
+    <h1 style="margin:0;">Subir video</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Estos videos los ven todos los pacientes en su pestaña "Videos" — no se relacionan con el contenido de NEF.</p>
+    <form method="post" action="{{ url_for('admin_nuevo_video') }}" enctype="multipart/form-data">
+      <label>Título</label>
+      <input type="text" name="titulo" required>
+      <label>Descripción (opcional)</label>
+      <textarea name="descripcion" rows="3"></textarea>
+      <label>Archivo de video</label>
+      <div class="video-dropzone" id="dropzone-admin">
+        <div id="dropzone-admin-texto"><strong>Arrastra tu video aquí</strong><br>o haz clic para seleccionarlo</div>
+        <div class="video-dropzone-archivo" id="dropzone-admin-archivo"></div>
+      </div>
+      <input type="file" name="archivo" id="input-video-admin" style="display:none;"
+             accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v" required>
+      <button type="submit">Subir</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;">Videos subidos</h2>
+    {% if admin_videos %}
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px; margin-top:14px;">
+      {% for v in admin_videos %}
+      <div style="border:1px solid var(--border); border-radius:10px; overflow:hidden;">
+        <video controls preload="metadata" style="width:100%; display:block; background:#000; aspect-ratio:9/16;">
+          <source src="{{ url_for('static', filename='videos/admin/' + v['archivo']) }}">
+        </video>
+        <div style="padding:10px;">
+          <strong style="font-size:0.9rem;">{{ v['titulo'] }}</strong>
+          {% if v['descripcion'] %}<p style="font-size:0.82rem; color:var(--muted); margin:4px 0;">{{ v['descripcion'] }}</p>{% endif %}
+          <span style="color:var(--muted); font-size:0.78rem;">{{ v['created_at'] }}</span>
+          <form method="post" action="{{ url_for('admin_eliminar_video', video_id=v['id']) }}"
+                onsubmit="return confirm('¿Eliminar este video?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">Aún no hay videos.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="inventarios">
+  <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab-btn" data-subtab="almacen">Almacén de producto terminado</button>
+    <button type="button" class="subtab-btn" data-subtab="pedidos">Pedidos de material</button>
+    <button type="button" class="subtab-btn" data-subtab="botes">Inventario de botes</button>
+    <button type="button" class="subtab-btn" data-subtab="cajas">Inventario de cajas</button>
+  </div>
+
+<div class="subtab-panel" data-subtab="almacen">
+  <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab2-btn" data-subtab2="existencia">Existencia</button>
+    <button type="button" class="subtab2-btn" data-subtab2="entregado">Entregado</button>
+  </div>
+
+  <div class="subtab2-panel" data-subtab2="existencia">
+  <div class="card">
+    <h1 style="margin:0;">Existencia en almacén</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Reporta aquí el producto terminado que entra al almacén.</p>
+    <form method="post" action="{{ url_for('admin_nuevo_movimiento_almacen') }}">
+      <input type="hidden" name="tipo" value="entrada">
+      <label>Material</label>
+      <select name="material" required>
+        <option value="" disabled selected>Selecciona una opción</option>
+        {% for m in materiales_producto_terminado %}
+        <option value="{{ m }}">{{ m }}</option>
+        {% endfor %}
+      </select>
+      <label>Cantidad (kg)</label>
+      <input type="number" name="cantidad" step="0.01" min="0.01" required style="max-width:200px;">
+      <label>Notas (opcional)</label>
+      <textarea name="motivo" rows="2"></textarea>
+      <button type="submit">Registrar entrada</button>
+    </form>
+
+    <table style="margin-top:20px;">
+      <tr><th>Material</th><th>Existencia actual</th></tr>
+      {% for e in existencia_almacen %}
+      <tr>
+        <td>{{ e['material'] }}</td>
+        <td>{{ "%.1f"|format(e['cantidad']) }} kg</td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    {% if almacen_entradas %}
+    <h2 style="margin-top:24px;">Historial de entradas</h2>
+    <table>
+      <tr><th>Fecha</th><th>Material</th><th>Cantidad</th><th>Notas</th></tr>
+      {% for m in almacen_entradas %}
+      <tr>
+        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['material'] }}</td>
+        <td>{{ "%.1f"|format(m['cantidad']) }} kg</td>
+        <td>{{ m['motivo'] or '' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </div>
+  </div>
+
+  <div class="subtab2-panel" data-subtab2="entregado">
+  <div class="card">
+    <h1 style="margin:0;">Entregado</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Reporta aquí la salida de producto terminado del almacén.</p>
+    <form method="post" action="{{ url_for('admin_nuevo_movimiento_almacen') }}">
+      <input type="hidden" name="tipo" value="salida">
+      <label>Material</label>
+      <select name="material" required>
+        <option value="" disabled selected>Selecciona una opción</option>
+        {% for m in materiales_producto_terminado %}
+        <option value="{{ m }}">{{ m }}</option>
+        {% endfor %}
+      </select>
+      <label>Cantidad (kg)</label>
+      <input type="number" name="cantidad" step="0.01" min="0.01" required style="max-width:200px;">
+      <label>Notas (opcional)</label>
+      <textarea name="motivo" rows="2"></textarea>
+      <button type="submit">Registrar salida</button>
+    </form>
+
+    {% if almacen_salidas %}
+    <table style="margin-top:20px;">
+      <tr><th>Fecha</th><th>Material</th><th>Cantidad</th><th>Notas</th></tr>
+      {% for m in almacen_salidas %}
+      <tr>
+        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['material'] }}</td>
+        <td>{{ "%.1f"|format(m['cantidad']) }} kg</td>
+        <td>{{ m['motivo'] or '' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no se han entregado materiales.</p>
+    {% endif %}
+  </div>
+  </div>
+</div>
+
+<div class="subtab-panel" data-subtab="pedidos">
+  <div class="card">
+    <h1 style="margin:0;">Hacer pedido de material</h1>
+    <form method="post" action="{{ url_for('admin_nuevo_pedido') }}">
+      <label>Material</label>
+      <input type="text" name="material" required>
+      <label>Cantidad (opcional)</label>
+      <input type="number" name="cantidad" step="0.01" min="0.01" style="max-width:200px;">
+      <label>Unidad (opcional)</label>
+      <input type="text" name="unidad" placeholder="Litros, botella, piezas, etc.">
+      <label>Proveedor (opcional)</label>
+      <input type="text" name="proveedor">
+      <label>Notas (opcional)</label>
+      <textarea name="notas" rows="2"></textarea>
+      <button type="submit">Registrar pedido</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Pedidos pendientes</h2>
+    {% if pedidos_pendientes %}
+    <table>
+      <tr><th>Fecha</th><th>Material</th><th>Cantidad</th><th>Proveedor</th><th>Notas</th><th></th></tr>
+      {% for p in pedidos_pendientes %}
+      <tr>
+        <td>{{ p['fecha_pedido'] }}</td>
+        <td>{{ p['material'] }}</td>
+        <td>{{ p['cantidad'] or '' }}{% if p['unidad'] %} {{ p['unidad'] }}{% endif %}{% if not p['cantidad'] and not p['unidad'] %}—{% endif %}</td>
+        <td>{{ p['proveedor'] or '—' }}</td>
+        <td>{{ p['notas'] or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_pedido_recibido', pedido_id=p['id']) }}" style="display:inline;">
+            <button type="submit" class="small">Recibido</button>
+          </form>
+          <form method="post" action="{{ url_for('admin_eliminar_pedido', pedido_id=p['id']) }}" style="display:inline;"
+                onsubmit="return confirm('¿Eliminar este pedido?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No hay pedidos pendientes.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Historial de recibidos</h2>
+    {% if pedidos_recibidos %}
+    <table>
+      <tr><th>Fecha de pedido</th><th>Fecha recibido</th><th>Material</th><th>Cantidad</th><th>Proveedor</th></tr>
+      {% for p in pedidos_recibidos %}
+      <tr>
+        <td>{{ p['fecha_pedido'] }}</td>
+        <td>{{ p['fecha_recibido'] }}</td>
+        <td>{{ p['material'] }}</td>
+        <td>{{ p['cantidad'] or '' }}{% if p['unidad'] %} {{ p['unidad'] }}{% endif %}{% if not p['cantidad'] and not p['unidad'] %}—{% endif %}</td>
+        <td>{{ p['proveedor'] or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay pedidos recibidos.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="subtab-panel" data-subtab="botes">
+  <div class="card">
+    <h1 style="margin:0;">Inventario de botes</h1>
+    <p style="font-size:2.5rem; font-weight:700; margin:14px 0 0;">{{ existencia_botes }} bote{{ 's' if existencia_botes != 1 else '' }}</p>
+    <p style="color:var(--muted); font-size:0.9rem; margin-top:10px;">
+      Se descuenta solo cuando se entrega un bote en una ruta, y se suma cuando el recolector confirma que recogió uno de regreso.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Agregar botes comprados</h2>
+    <form method="post" action="{{ url_for('admin_nuevo_bote_inventario') }}">
+      <label>Cantidad</label>
+      <input type="number" name="cantidad" min="1" step="1" required style="max-width:200px;">
+      <label>Notas (opcional)</label>
+      <textarea name="notas" rows="2" placeholder="Proveedor, número de factura, etc."></textarea>
+      <button type="submit">Agregar al inventario</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Movimientos</h2>
+    {% if movimientos_botes %}
+    <table>
+      <tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Notas</th></tr>
+      {% for m in movimientos_botes %}
+      <tr>
+        <td>{{ m['created_at'] }}</td>
+        <td>
+          {% if m['tipo'] == 'compra' %}<span class="badge entregado">Compra</span>
+          {% elif m['tipo'] == 'entrega' %}<span class="badge pendiente_entrega">Entrega</span>
+          {% else %}<span class="badge programada">Devolución</span>{% endif %}
+        </td>
+        <td>{{ '+' if m['tipo'] != 'entrega' else '-' }}{{ m['cantidad'] }}</td>
+        <td>{{ m['notas'] or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay movimientos.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="subtab-panel" data-subtab="cajas">
+  <div class="card">
+    <h1 style="margin:0;">Inventario de cajas</h1>
+    <p style="color:var(--muted); font-size:0.9rem; margin-top:6px;">
+      Se suma cuando un paciente dona cajas y se resta cuando un paciente recibe cajas del almacén.
+    </p>
+    <table style="margin-top:14px;">
+      <tr><th>Tipo de caja</th><th>Existencia actual</th></tr>
+      {% for e in existencia_cajas %}
+      <tr>
+        <td>{{ e['material'] }}</td>
+        <td>{{ e['cantidad'] }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Ajuste manual</h2>
+    <p style="color:var(--muted); font-size:0.85rem;">Usa números negativos para restar (p. ej. -3).</p>
+    <form method="post" action="{{ url_for('admin_ajuste_cajas') }}">
+      <label>Tipo de caja</label>
+      <select name="material" required>
+        <option value="" disabled selected>Selecciona una opción</option>
+        {% for t in tipos_cajas %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+      <label>Cantidad (puede ser negativa)</label>
+      <input type="number" name="cantidad" step="1" required style="max-width:200px;">
+      <label>Notas (opcional)</label>
+      <textarea name="notas" rows="2"></textarea>
+      <button type="submit">Registrar ajuste</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Movimientos</h2>
+    {% if movimientos_cajas %}
+    <table>
+      <tr><th>Fecha</th><th>Tipo de caja</th><th>Movimiento</th><th>Cantidad</th><th>Notas</th></tr>
+      {% for m in movimientos_cajas %}
+      <tr>
+        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['material'] }}</td>
+        <td>
+          {% if m['tipo'] == 'donacion' %}<span class="badge entregado">Donación</span>
+          {% elif m['tipo'] == 'entrega' %}<span class="badge pendiente_entrega">Entrega</span>
+          {% else %}<span class="badge programada">Ajuste</span>{% endif %}
+        </td>
+        <td>{{ '+' if m['cantidad'] > 0 else '' }}{{ m['cantidad'] }}</td>
+        <td>{{ m['notas'] or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay movimientos.</p>
+    {% endif %}
+  </div>
+</div>
+</div>
+
+<div class="tab-panel" data-tab="productividad">
+  <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab-btn" data-subtab="dia">Del día</button>
+    <button type="button" class="subtab-btn" data-subtab="semana">Semanal</button>
+  </div>
+
+  <div class="subtab-panel" data-subtab="dia">
+  <div class="card">
+    <h1 style="margin:0;">Productividad del día</h1>
+    <form method="get" style="display:flex; gap:8px; align-items:flex-end; margin-top:10px; flex-wrap:wrap;">
+      <input type="hidden" name="tab" value="productividad">
+      <div>
+        <label>Fecha</label>
+        <input type="date" name="fecha" value="{{ fecha_productividad }}" onchange="this.form.submit()">
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Registrar actividad</h2>
+    <form method="post" action="{{ url_for('admin_nueva_productividad') }}">
+      <input type="hidden" name="fecha" value="{{ fecha_productividad }}">
+      <label>¿Quién lo hizo?</label>
+      <select name="persona" required>
+        <option value="" disabled selected>Selecciona una opción</option>
+        {% for p in personas_productividad %}
+        <option value="{{ p }}">{{ p }}</option>
+        {% endfor %}
+      </select>
+      <label>Actividad</label>
+      <select name="actividad" required>
+        <option value="" disabled selected>Selecciona una opción</option>
+        {% for a in actividades_productividad %}
+        <option value="{{ a }}">{{ actividades_productividad_labels[a] }}</option>
+        {% endfor %}
+      </select>
+      <label>Cantidad (kg, opcional)</label>
+      <input type="number" name="cantidad_kg" step="0.01" min="0" style="max-width:200px;">
+      <label>Notas (opcional)</label>
+      <textarea name="notas" rows="2"></textarea>
+      <button type="submit">Registrar</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Resumen del {{ fecha_productividad }}</h2>
+    <div class="table-scroll">
+    <table style="min-width:auto;">
+      <tr><th>Persona</th><th>Actividades</th><th>Kg</th></tr>
+      {% for r in resumen_por_persona %}
+      <tr>
+        <td>{{ r['persona'] }}</td>
+        <td>{{ r['n'] }}</td>
+        <td>{{ "%.1f"|format(r['kg']) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="empty">Sin registros este día.</td></tr>
+      {% endfor %}
+    </table>
+    </div>
+    <div class="table-scroll" style="margin-top:14px;">
+    <table style="min-width:auto;">
+      <tr><th>Actividad</th><th>Veces</th><th>Kg</th></tr>
+      {% for r in resumen_por_actividad %}
+      <tr>
+        <td>{{ actividades_productividad_labels[r['actividad']] }}</td>
+        <td>{{ r['n'] }}</td>
+        <td>{{ "%.1f"|format(r['kg']) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="empty">Sin registros este día.</td></tr>
+      {% endfor %}
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Detalle del {{ fecha_productividad }}</h2>
+    {% if productividad_dia %}
+    <table>
+      <tr><th>Hora</th><th>Persona</th><th>Actividad</th><th>Kg</th><th>Notas</th><th></th></tr>
+      {% for r in productividad_dia %}
+      <tr>
+        <td>{{ r['created_at'][11:16] }}</td>
+        <td>{{ r['persona'] }}</td>
+        <td>{{ actividades_productividad_labels[r['actividad']] }}</td>
+        <td>{{ "%.1f"|format(r['cantidad_kg']) if r['cantidad_kg'] is not none else '—' }}</td>
+        <td>{{ r['notas'] or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_eliminar_productividad', productividad_id=r['id']) }}"
+                onsubmit="return confirm('¿Eliminar este registro?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay actividad registrada este día.</p>
+    {% endif %}
+  </div>
+  </div>
+
+  <div class="subtab-panel" data-subtab="semana">
+  <div class="card">
+    <h1 style="margin:0;">Productividad semanal</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Semana de {{ dias_semana[0] }} a {{ dias_semana[-1] }} (lunes a viernes).</p>
+    <form method="get" style="display:flex; gap:8px; align-items:flex-end; margin-top:10px; flex-wrap:wrap;">
+      <input type="hidden" name="tab" value="semana">
+      <div>
+        <label>Cualquier día de la semana</label>
+        <input type="date" name="semana" value="{{ semana_ref_str }}" onchange="this.form.submit()">
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Kg por persona y día</h2>
+    <div class="table-scroll">
+    <table>
+      <tr>
+        <th>Persona</th>
+        {% for d in dias_semana_info %}<th>{{ d.label }}</th>{% endfor %}
+        <th>Total semana</th>
+      </tr>
+      {% for p in personas_productividad %}
+      <tr>
+        <td>{{ p }}</td>
+        {% for d in dias_semana_info %}<td>{{ "%.1f"|format(matriz_semana[p][d.fecha]) }}</td>{% endfor %}
+        <td><strong>{{ "%.1f"|format(totales_persona_semana[p]) }}</strong></td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Kg por actividad esta semana</h2>
+    <table style="min-width:auto;">
+      <tr><th>Actividad</th><th>Kg</th></tr>
+      {% for a in actividades_productividad %}
+      <tr>
+        <td>{{ actividades_productividad_labels[a] }}</td>
+        <td>{{ "%.1f"|format(totales_actividad_semana[a]) }}</td>
+      </tr>
+      {% endfor %}
+      <tr><td><strong>Total</strong></td><td><strong>{{ "%.1f"|format(total_semana_kg) }}</strong></td></tr>
+    </table>
+  </div>
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="vacaciones">
+  <div class="card">
+    <h1 style="margin:0;">Vacaciones</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Días de vacaciones de cada trabajador — se van descontando conforme se registran.</p>
+    <div class="table-scroll">
+    <table style="min-width:auto;">
+      <tr><th>Trabajador</th><th>Días totales</th><th>Tomados</th><th>Restantes</th><th></th></tr>
+      {% for r in resumen_vacaciones %}
+      <tr>
+        <td>{{ r['persona'] }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_actualizar_saldo_vacaciones') }}" style="display:flex; gap:6px; align-items:center;">
+            <input type="hidden" name="persona" value="{{ r['persona'] }}">
+            <input type="number" name="dias_totales" min="0" value="{{ r['dias_totales'] }}" style="width:70px;">
+            <button type="submit" class="small secondary">Guardar</button>
+          </form>
+        </td>
+        <td>{{ r['dias_tomados'] }}</td>
+        <td><strong>{{ r['dias_restantes'] }}</strong></td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Registrar vacaciones</h2>
+    <form method="post" action="{{ url_for('admin_nueva_vacacion') }}">
+      <label>Trabajador</label>
+      <select name="persona" required>
+        <option value="" disabled selected>Selecciona una opción</option>
+        {% for p in personas_vacaciones %}
+        <option value="{{ p }}">{{ p }}</option>
+        {% endfor %}
+      </select>
+      <label>Del día</label>
+      <input type="date" name="fecha_inicio" required>
+      <label>Al día</label>
+      <input type="date" name="fecha_fin" required>
+      <label>Notas (opcional)</label>
+      <textarea name="notas" rows="2"></textarea>
+      <button type="submit">Registrar</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Historial</h2>
+    {% if vacaciones_registros %}
+    <table>
+      <tr><th>Trabajador</th><th>Del</th><th>Al</th><th>Días</th><th>Notas</th><th></th></tr>
+      {% for r in vacaciones_registros %}
+      <tr>
+        <td>{{ r['persona'] }}</td>
+        <td>{{ r['fecha_inicio'] }}</td>
+        <td>{{ r['fecha_fin'] }}</td>
+        <td>{{ r['dias'] }}</td>
+        <td>{{ r['notas'] or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_eliminar_vacacion', vacacion_id=r['id']) }}"
+                onsubmit="return confirm('¿Eliminar este registro de vacaciones?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay vacaciones registradas.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+const TAB_ALIAS = {
+  pacientes: {tab: 'pacientes', subtab: 'lista'},
+  inscritos: {tab: 'pacientes', subtab: 'inscritos'},
+  espera: {tab: 'pacientes', subtab: 'espera'},
+  pendientes_ruta: {tab: 'pacientes', subtab: 'pendientes_ruta'},
+  dinero: {tab: 'dinero', subtab: 'ingreso'},
+  ingreso: {tab: 'dinero', subtab: 'ingreso'},
+  egreso: {tab: 'dinero', subtab: 'egreso'},
+  total: {tab: 'dinero', subtab: 'total'},
+  kg: {tab: 'kg', subtab: 'dia'},
+  dia: {tab: 'kg', subtab: 'dia'},
+  acumulado: {tab: 'kg', subtab: 'acumulado'},
+  almacen: {tab: 'inventarios', subtab: 'almacen', subtab2: 'existencia'},
+  existencia: {tab: 'inventarios', subtab: 'almacen', subtab2: 'existencia'},
+  entregado: {tab: 'inventarios', subtab: 'almacen', subtab2: 'entregado'},
+  pedidos: {tab: 'inventarios', subtab: 'pedidos'},
+  botes: {tab: 'inventarios', subtab: 'botes'},
+  cajas: {tab: 'inventarios', subtab: 'cajas'},
+  semana: {tab: 'productividad', subtab: 'semana'},
+};
+
+function activarTab(tabParam) {
+  var alias = TAB_ALIAS[tabParam];
+  var tab = alias ? alias.tab : tabParam;
+  var subtabInicial = alias ? alias.subtab : null;
+  var subtab2Inicial = alias ? alias.subtab2 : null;
+  var valido = Array.from(document.querySelectorAll('.tab-btn')).some(b => b.dataset.tab === tab);
+  if (!valido) tab = 'pacientes';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
+  if (tab === 'paciente' && window.invalidarMapaPaciente) {
+    setTimeout(window.invalidarMapaPaciente, 0);
+  }
+  var panelActivo = document.querySelector('.tab-panel[data-tab="' + tab + '"]');
+  var primerSubtabBtn = panelActivo ? panelActivo.querySelector('.subtab-btn') : null;
+  if (primerSubtabBtn) activarSubtab(subtabInicial || primerSubtabBtn.dataset.subtab, subtab2Inicial);
+}
+function activarSubtab(subtab, subtab2Inicial) {
+  var panelActivo = document.querySelector('.tab-panel.active');
+  if (!panelActivo) return;
+  var valido = Array.from(panelActivo.querySelectorAll('.subtab-btn')).some(b => b.dataset.subtab === subtab);
+  if (!valido) return;
+  panelActivo.querySelectorAll('.subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab === subtab));
+  panelActivo.querySelectorAll('.subtab-panel').forEach(p => p.classList.toggle('active', p.dataset.subtab === subtab));
+  var subPanelActivo = panelActivo.querySelector('.subtab-panel[data-subtab="' + subtab + '"]');
+  var primerSubtab2Btn = subPanelActivo ? subPanelActivo.querySelector('.subtab2-btn') : null;
+  if (primerSubtab2Btn) activarSubtab2(subtab2Inicial || primerSubtab2Btn.dataset.subtab2);
+}
+function activarSubtab2(subtab2) {
+  var subPanelActivo = document.querySelector('.tab-panel.active .subtab-panel.active');
+  if (!subPanelActivo) return;
+  var valido = Array.from(subPanelActivo.querySelectorAll('.subtab2-btn')).some(b => b.dataset.subtab2 === subtab2);
+  if (!valido) return;
+  subPanelActivo.querySelectorAll('.subtab2-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab2 === subtab2));
+  subPanelActivo.querySelectorAll('.subtab2-panel').forEach(p => p.classList.toggle('active', p.dataset.subtab2 === subtab2));
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => activarTab(b.dataset.tab)));
+document.querySelectorAll('.subtab-btn').forEach(b => b.addEventListener('click', () => activarSubtab(b.dataset.subtab)));
+document.querySelectorAll('.subtab2-btn').forEach(b => b.addEventListener('click', () => activarSubtab2(b.dataset.subtab2)));
+activarTab(new URLSearchParams(location.search).get('tab') || 'pacientes');
+
+const btnPacientesIzq = document.getElementById('btn-pacientes-izq');
+const btnPacientesDer = document.getElementById('btn-pacientes-der');
+if (btnPacientesIzq) {
+  btnPacientesIzq.addEventListener('click', () => document.getElementById('tabla-pacientes').scrollBy({left: -300, behavior: 'smooth'}));
+  btnPacientesDer.addEventListener('click', () => document.getElementById('tabla-pacientes').scrollBy({left: 300, behavior: 'smooth'}));
+}
+
+function activarDropzoneVideo(dropzoneId, textoId, archivoId, inputId) {
+  const dropzone = document.getElementById(dropzoneId);
+  const texto = document.getElementById(textoId);
+  const archivoTexto = document.getElementById(archivoId);
+  const input = document.getElementById(inputId);
+
+  function mostrarArchivo(nombre) {
+    texto.style.display = 'none';
+    archivoTexto.textContent = '📹 ' + nombre;
+  }
+
+  dropzone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    if (input.files.length) mostrarArchivo(input.files[0].name);
+  });
+  ['dragenter', 'dragover'].forEach((evento) => {
+    dropzone.addEventListener(evento, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+  });
+  ['dragleave', 'drop'].forEach((evento) => {
+    dropzone.addEventListener(evento, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    });
+  });
+  dropzone.addEventListener('drop', (e) => {
+    const archivos = e.dataTransfer.files;
+    if (archivos.length) {
+      input.files = archivos;
+      mostrarArchivo(archivos[0].name);
+    }
+  });
+}
+activarDropzoneVideo('dropzone-admin', 'dropzone-admin-texto', 'dropzone-admin-archivo', 'input-video-admin');
+</script>
+{% endblock %}

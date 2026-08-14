@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Bienvenido{% endblock %}
+{% block content %}
+<div class="card" style="text-align:center; padding:36px 20px;">
+  <h1 style="font-size:1.8rem;">Bienvenido a RE-PVC</h1>
+  <p style="color:var(--muted);">Muchas gracias por formar parte del programa. Gracias a ti, le damos una segunda vida a este material.</p>
+</div>
+
+<div class="card">
+  <h2>Solicitud de tratamiento</h2>
+  <form method="post" action="{{ url_for('cliente_bienvenida') }}">
+    <label>Edad</label>
+    <input type="number" name="edad" min="0" max="120" required>
+
+    <label>¿Máquina o manual?</label>
+    <select name="tipo_maquina" required>
+      <option value="" disabled selected>Selecciona una opción</option>
+      <option value="maquina">Máquina</option>
+      <option value="manual">Manual</option>
+    </select>
+
+    <label>Marca</label>
+    <select name="marca" required>
+      <option value="" disabled selected>Selecciona una opción</option>
+      <option value="baxter">Baxter</option>
+      <option value="pisa">Pisa</option>
+    </select>
+
+    <label>Frecuencia de tratamiento por semana</label>
+    <input type="number" name="frecuencia_semana" min="1" max="30" required>
+
+    <label>Causa de la enfermedad renal</label>
+    <select name="causa_enfermedad" required>
+      <option value="" disabled selected>Selecciona una opción</option>
+      <option value="diabetes">Diabetes</option>
+      <option value="hipertension">Hipertensión</option>
+      <option value="autoinmune">Enfermedad autoinmune</option>
+      <option value="desconocida">Desconocida</option>
+    </select>
+
+    <div style="background:var(--bg); border-radius:8px; padding:14px; margin-top:20px;">
+      <strong>NEF — Educación renal</strong>
+      <p style="color:var(--muted); font-size:0.88rem; margin-top:6px;">
+        NEF es una organización con la que colaboramos, dedicada a la educación renal: sobre todo prevención,
+        pero también información y grupos de apoyo entre pacientes. De vez en cuando organizan actividades
+        como carreras o picnics renales. Si quieres, te podemos mantener informado de su contenido y sus
+        próximos eventos aquí mismo en tu sesión.
+      </p>
+      <label>¿Quieres recibir información de NEF?</label>
+      <div class="radio-row">
+        <label><input type="radio" name="recibir_info_nef" value="1" required> Quiero recibir información</label>
+        <label><input type="radio" name="recibir_info_nef" value="0" required> No quiero recibir información</label>
+      </div>
+    </div>
+
+    <button type="submit">Continuar</button>
+  </form>
+</div>
+{% endblock %}

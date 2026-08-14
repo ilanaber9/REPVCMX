@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Bienvenido{% endblock %}
+{% block content %}
+<div class="card auth-card" style="text-align:center;">
+  <a href="{{ url_for('home') }}" style="font-size:0.85rem; align-self:flex-start;">&larr; Volver</a>
+  <h1>Bienvenido a RE-PVC</h1>
+  <p style="color:var(--muted);">Gracias por tu interés en formar parte del programa.</p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">¿Hay ruta en tu zona?</h2>
+  <p style="color:var(--muted); font-size:0.9rem;">
+    Antes de crear tu cuenta, verifica si ya cubrimos tu zona con alguna ruta de recolección.
+  </p>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <input type="text" id="direccion-verificar" placeholder="Código postal" maxlength="5" pattern="[0-9]*" inputmode="numeric" style="flex:1; min-width:140px; max-width:160px;">
+    <button type="button" id="btn-verificar-zona" class="small" style="margin-top:0;">Verificar</button>
+  </div>
+  <p id="resultado-verificar-zona" style="font-size:0.85rem; margin:10px 0 0;"></p>
+  <div id="resultados-verificar-zona" style="margin-top:8px;"></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Condiciones del programa</h2>
+  <ul style="padding-left:20px; line-height:1.7; color:var(--text);">
+    <li>El servicio que ofrecemos en RE-PVC es y siempre será gratuito; no aceptes ningún cobro por la recolección ni por los tratamientos.</li>
+    <li>El bote que te entregamos es un préstamo, propiedad de RE-PVC. En cuanto dejes de participar en el programa, debe regresarse en buen estado.</li>
+    <li>Se pagan $5 por kg de material, siempre y cuando venga separado y seco, como se indica en el video.</li>
+  </ul>
+  <a class="btn" href="{{ url_for('registro') }}" style="text-align:center; display:block; margin-top:16px;">Empecemos</a>
+  <p style="margin-top:14px; font-size:0.85rem; color:var(--muted); text-align:center;">
+    ¿Ya tienes cuenta? <a href="{{ url_for('login', tipo='cliente') }}">Inicia sesión</a>.
+  </p>
+</div>
+
+<script>
+const resultadosZonaDiv = document.getElementById('resultados-verificar-zona');
+
+function mostrarVerdicto(resultado, r) {
+  resultadosZonaDiv.innerHTML = '';
+  if (r.cubierto) {
+    resultado.style.color = 'var(--green-dark)';
+    resultado.textContent = '✅ Sí, ya cubrimos esa zona con una ruta.';
+  } else {
+    resultado.style.color = 'var(--danger)';
+    resultado.textContent = '⚠️ Por ahora no tenemos ruta en esa zona, puedes registrarte y te notificaremos en cuanto la tengamos.';
+  }
+}
+
+document.getElementById('btn-verificar-zona').addEventListener('click', async () => {
+  const cp = document.getElementById('direccion-verificar').value.trim();
+  const resultado = document.getElementById('resultado-verificar-zona');
+  resultadosZonaDiv.innerHTML = '';
+  if (!cp) {
+    resultado.style.color = 'var(--muted)';
+    resultado.textContent = 'Escribe tu código postal primero.';
+    return;
+  }
+  resultado.style.color = 'var(--muted)';
+  resultado.textContent = 'Buscando…';
+  try {
+    const resp = await fetch('/paciente/verificar-zona?cp=' + encodeURIComponent(cp));
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'No se pudo verificar.');
+    if (data.resultados.length === 1) {
+      mostrarVerdicto(resultado, data.resultados[0]);
+      return;
+    }
+    resultado.style.color = 'var(--muted)';
+    resultado.textContent = 'Encontramos varios lugares que podrían coincidir — elige el correcto:';
+    data.resultados.forEach((r) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'small secondary';
+      btn.style.display = 'block';
+      btn.style.width = '100%';
+      btn.style.textAlign = 'left';
+      btn.style.marginTop = '6px';
+      btn.textContent = r.etiqueta;
+      btn.addEventListener('click', () => mostrarVerdicto(resultado, r));
+      resultadosZonaDiv.appendChild(btn);
+    });
+  } catch (e) {
+    resultado.style.color = 'var(--danger)';
+    resultado.textContent = e.message;
+  }
+});
+</script>
+{% endblock %}

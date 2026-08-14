@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% block title %}{{ ruta['nombre'] }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <a href="{{ url_for('recolector_dashboard') }}" style="font-size:0.85rem;">&larr; Volver</a>
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+    <h1 style="margin:0;">{{ ruta['nombre'] }}</h1>
+  </div>
+  <p>Fecha: {{ ruta['fecha'] }} · Estado: <span class="badge {{ ruta['estado'] }}">{{ ruta['estado'] }}</span></p>
+
+  {% if botes_pendientes %}
+  <p style="background:#fff2d9; color:var(--warn); border-radius:8px; padding:10px 14px; font-weight:600;">
+    🪣 Carga {{ botes_pendientes }} bote{{ 's' if botes_pendientes != 1 else '' }} pendiente{{ 's' if botes_pendientes != 1 else '' }} de entregar en esta ruta.
+  </p>
+  {% endif %}
+
+  {% if cajas_por_material %}
+  <p style="background:#fff2d9; color:var(--warn); border-radius:8px; padding:10px 14px; font-weight:600;">
+    📦 Cajas que necesitas cargar en esta ruta:
+    {% for material, cantidad in cajas_por_material.items() %}{{ cantidad }} {{ material }}{% if not loop.last %}, {% endif %}{% endfor %}.
+  </p>
+  {% endif %}
+
+  {% if ruta['hora_inicio_real'] %}
+  <p style="color:var(--muted); font-size:0.88rem;">
+    Iniciada a las {{ ruta['hora_inicio_real'][11:16] }}
+    {% if ruta['hora_fin_real'] %}
+      · Finalizada a las {{ ruta['hora_fin_real'][11:16] }}
+      · <strong>Tiempo real: {{ tiempo_real }}</strong>
+    {% else %}
+      · <strong>En curso — llevas {{ tiempo_real }}</strong>
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {% if estimado %}
+  <p style="color:var(--muted); font-size:0.88rem;">
+    Tiempo estimado ida y vuelta desde Filiberto Gómez 279: <strong>{{ estimado['duracion'] }}</strong> ({{ estimado['distancia_km'] }} km)
+    {% if estimado['fuente'] == 'linea_recta' %}<br><em>Sin conexión al servicio de rutas — estimado en línea recta, puede quedarse corto.</em>{% endif %}
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+    <h2 style="margin:0;">Mapa de la ruta</h2>
+    <button type="button" id="btn-ubicacion" class="small">Seguir mi ubicación</button>
+  </div>
+  <p id="ubicacion-estado" style="font-size:0.8rem; color:var(--muted); margin:6px 0 0;"></p>
+  <div id="mapa" style="height:340px; border-radius:8px; margin-top:8px;"></div>
+</div>
+
+<div class="card">
+  <h2>Paradas</h2>
+  {% if paradas %}
+  <ul class="checklist">
+    {% if not ruta['hora_inicio_real'] %}
+    <li class="parada-accion" style="text-align:center;">
+      <strong style="font-size:1.1rem;">🚚 Antes de la primera parada</strong><br>
+      <form method="post" action="{{ url_for('recolector_iniciar_ruta', ruta_id=ruta['id']) }}" style="margin-top:10px;">
+        <button type="submit" style="font-size:1.05rem; padding:12px 28px;">Iniciar ruta</button>
+      </form>
+    </li>
+    {% endif %}
+    {% for p in paradas %}
+    <li class="parada-{{ p['estado'] }}">
+      <strong>#{{ p['orden'] }} — {{ p['direccion'] }}</strong>
+      <span class="badge {{ p['estado'] }}">{{ p['estado'] }}</span>
+      {% if p['tipo'] == 'entrega' %}<span class="badge pendiente_entrega">entrega</span>{% endif %}
+      {% if p['solicitud_extra_id'] %}<span class="badge pendiente_entrega">2 solicitudes en 1 visita</span>{% endif %}
+      {% if p['confirmado_paciente'] == 'si' %}<span class="badge entregado">Confirmó: sí puede</span>
+      {% elif p['confirmado_paciente'] == 'no' %}<span class="badge incidencia">Confirmó: no puede</span>{% endif %}
+      {% if p['bote_a_devolver'] %}<span class="badge incidencia">🪣 Recoger bote de regreso</span>{% endif %}<br>
+      Cliente: {{ p['cliente_nombre'] }}{% if p['modalidad'] == 'compra' %} 💲{% endif %}
+      {% if p['telefono'] %}<a href="tel:{{ p['telefono']|replace(' ', '') }}" title="Llamar a {{ p['cliente_nombre'] }}" style="text-decoration:none;">📞</a>{% endif %}
+      {% if p['material'] != 'PVC' and p['material_extra'] %}
+      · Material: {{ p['material'] }} + {{ p['material_extra'] }}
+      {% elif p['material'] != 'PVC' %}
+      · Material: {{ p['material'] }}
+      {% elif p['material_extra'] %}
+      · Material: {{ p['material_extra'] }}
+      {% endif %}
+      {% if p['modalidad'] %} · {{ 'Compra' if p['modalidad'] == 'compra' else 'Donación' }}{% endif %}
+      {% if p['notas_solicitud'] %}<br>Notas del cliente: {{ p['notas_solicitud'] }}{% endif %}
+
+      <div class="estado-form" style="margin-top:8px;">
+        {% if p['lat'] and p['lon'] %}
+        <a class="btn secondary small" target="_blank" rel="noopener"
+           href="https://www.google.com/maps/dir/?api=1&destination={{ p['lat'] }},{{ p['lon'] }}">Google Maps</a>
+        <a class="btn secondary small" target="_blank" rel="noopener"
+           href="https://waze.com/ul?ll={{ p['lat'] }},{{ p['lon'] }}&navigate=yes">Waze</a>
+        {% else %}
+        <a class="btn secondary small" target="_blank" rel="noopener"
+           href="https://www.google.com/maps/dir/?api=1&destination={{ p['direccion'] | urlencode }}">Google Maps</a>
+        <a class="btn secondary small" target="_blank" rel="noopener"
+           href="https://waze.com/ul?q={{ p['direccion'] | urlencode }}&navigate=yes">Waze</a>
+        {% endif %}
+        {% if p['bote_a_devolver'] %}
+        <form class="inline" method="post" action="{{ url_for('recolector_bote_devuelto', parada_id=p['id']) }}">
+          <button type="submit" class="small">🪣 Bote recibido</button>
+        </form>
+        {% endif %}
+      </div>
+
+      {% if p['estado'] == 'pendiente' %}
+      <form class="estado-form" method="post" action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
+        <input type="text" name="notas" placeholder="Notas (opcional)" value="{{ p['notas'] or '' }}" style="flex:1; min-width:160px;">
+        <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
+          Kg recolectados
+          <input type="number" name="kg" step="0.1" min="0" placeholder="0"
+                 value="{{ p['kg_recolectados'] or '' }}" style="width:120px;">
+        </label>
+        {% if p['cantidad_cajas'] is not none %}
+        <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
+          {{ 'Cajas entregadas' if p['tipo'] == 'entrega' else 'Cajas recibidas' }} (solicitó {{ p['cantidad_cajas'] }})
+          <input type="number" name="cajas" step="1" min="0" placeholder="{{ p['cantidad_cajas'] }}"
+                 value="{{ p['cajas_reales'] if p['cajas_reales'] is not none else '' }}" style="width:140px;">
+        </label>
+        {% elif p['cantidad_cajas_extra'] is not none %}
+        <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
+          {{ 'Cajas entregadas' if p['tipo_extra'] == 'entrega' else 'Cajas recibidas' }} (solicitó {{ p['cantidad_cajas_extra'] }})
+          <input type="number" name="cajas" step="1" min="0" placeholder="{{ p['cantidad_cajas_extra'] }}"
+                 value="{{ p['cajas_reales'] if p['cajas_reales'] is not none else '' }}" style="width:140px;">
+        </label>
+        {% endif %}
+        {% if p['solicitud_extra_id'] %}
+        <button class="small" type="submit" name="estado" value="completada">Marcar completado</button>
+        {% elif p['tipo'] == 'entrega' %}
+        <button class="small" type="submit" name="estado" value="completada">Marcar entregado</button>
+        {% else %}
+        <button class="small" type="submit" name="estado" value="completada">Marcar recolectado</button>
+        {% endif %}
+        <button class="small warn" type="submit" name="estado" value="ausente">Nadie en casa</button>
+        <button class="small danger" type="submit" name="estado" value="incidencia">Reportar incidencia</button>
+      </form>
+      {% else %}
+      <div class="estado-form" style="margin-top:8px; font-size:0.85rem; color:var(--muted);">
+        {% if p['notas'] %}Notas: {{ p['notas'] }}{% endif %}
+        {% if p['kg_recolectados'] %}{% if p['notas'] %} · {% endif %}{{ "%.1f"|format(p['kg_recolectados']) }} kg recolectados{% endif %}
+        {% if p['cajas_reales'] is not none %}{% if p['notas'] or p['kg_recolectados'] %} · {% endif %}{{ p['cajas_reales'] }} {{ 'cajas entregadas' if p['tipo'] == 'entrega' else 'cajas recibidas' }}{% endif %}
+      </div>
+      {% endif %}
+    </li>
+    {% endfor %}
+    {% if ruta['hora_inicio_real'] and not ruta['hora_fin_real'] %}
+    <li class="parada-accion" style="text-align:center;">
+      <strong style="font-size:1.1rem;">🏁 Después de la última parada</strong><br>
+      <form method="post" action="{{ url_for('recolector_finalizar_ruta', ruta_id=ruta['id']) }}"
+            onsubmit="return confirm('¿Finalizar la ruta? Se guardará el tiempo real que te tomó.');" style="margin-top:10px;">
+        <button type="submit" class="danger" style="font-size:1.05rem; padding:12px 28px;">Finalizar ruta</button>
+      </form>
+    </li>
+    {% endif %}
+  </ul>
+  {% else %}
+  <p class="empty">Esta ruta no tiene paradas.</p>
+  {% endif %}
+</div>
+
+
+<script>
+const puntos = {{ paradas_json | safe }};
+const map = L.map('mapa');
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+}).addTo(map);
+
+const depot = [19.5438982, -99.2055009];
+const depotIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:3px;background:#1c2420;border:3px solid white;box-shadow:0 0 0 2px #1c2420;"></div>',
+  iconSize: [16, 16], iconAnchor: [8, 8],
+});
+const depotMarker = L.marker(depot, {icon: depotIcon}).bindPopup('Depósito — Filiberto Gómez 279');
+
+const geometriaCalles = {{ (estimado.geometria if estimado else none) | tojson }};
+
+const coords = puntos.filter(p => p.lat && p.lon).map(p => [p.lat, p.lon]);
+if (coords.length) {
+  const markers = puntos.filter(p => p.lat && p.lon).map(p =>
+    L.marker([p.lat, p.lon]).bindPopup(`<strong>#${p.orden} ${p.cliente_nombre}</strong><br>${p.direccion}${p.material !== 'PVC' ? '<br>' + p.material : ''}`)
+  );
+  const group = L.featureGroup([...markers, depotMarker]).addTo(map);
+  if (geometriaCalles) {
+    L.polyline(geometriaCalles, {color: '#1f7a4d', weight: 4}).addTo(map);
+  } else {
+    L.polyline([depot, ...coords, depot], {color: '#1f7a4d', weight: 3, dashArray: '6 6'}).addTo(map);
+  }
+  map.fitBounds(group.getBounds().pad(0.2));
+} else {
+  depotMarker.addTo(map);
+  map.setView(depot, 11);
+}
+
+const miIcono = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:50%;background:#1565C0;border:3px solid white;box-shadow:0 0 0 2px #1565C0;"></div>',
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
+let miMarcador = null;
+let watchId = null;
+let primerFix = true;
+const btn = document.getElementById('btn-ubicacion');
+const estado = document.getElementById('ubicacion-estado');
+
+btn.addEventListener('click', () => {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    if (miMarcador) { map.removeLayer(miMarcador); miMarcador = null; }
+    btn.textContent = 'Seguir mi ubicación';
+    estado.textContent = '';
+    return;
+  }
+  if (!navigator.geolocation) {
+    estado.textContent = 'Este navegador no soporta geolocalización.';
+    return;
+  }
+  btn.textContent = 'Dejar de seguir';
+  estado.textContent = 'Buscando tu ubicación…';
+  primerFix = true;
+  watchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const ll = [pos.coords.latitude, pos.coords.longitude];
+      if (!miMarcador) {
+        miMarcador = L.marker(ll, {icon: miIcono}).addTo(map).bindPopup('Tu ubicación');
+      } else {
+        miMarcador.setLatLng(ll);
+      }
+      estado.textContent = 'Ubicación activa · precisión ~' + Math.round(pos.coords.accuracy) + ' m';
+      if (primerFix) {
+        map.setView(ll, 15);
+        primerFix = false;
+      }
+    },
+    (err) => {
+      estado.textContent = 'No se pudo obtener tu ubicación (' + err.message + ').';
+      btn.textContent = 'Seguir mi ubicación';
+      watchId = null;
+    },
+    {enableHighAccuracy: true, maximumAge: 5000}
+  );
+});
+</script>
+{% endblock %}

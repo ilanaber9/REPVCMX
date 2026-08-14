@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Mapa de puntos{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  #mapa { height: 72vh; border-radius: 10px; }
+  .leyenda { display:flex; gap:14px; flex-wrap:wrap; font-size:0.85rem; margin-top:10px; color: var(--muted); }
+  .leyenda span { display:inline-flex; align-items:center; gap:5px; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <a href="{{ url_for('admin_dashboard') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
+  <h1>Mapa de puntos de recolección</h1>
+  <p style="color:var(--muted); font-size:0.9rem;">{{ puntos|length }} puntos con coordenadas.</p>
+</div>
+<div class="card">
+  <div id="mapa"></div>
+  <div class="leyenda">
+    <span><span class="dot" style="background:#a0630a;"></span> pendiente</span>
+    <span><span class="dot" style="background:#6d28d9;"></span> pendiente de entrega</span>
+    <span><span class="dot" style="background:#1d4ed8;"></span> programada</span>
+    <span><span class="dot" style="background:#1f7a4d;"></span> recolectada</span>
+    <span><span class="dot" style="background:#b3261e;"></span> incidencia</span>
+  </div>
+</div>
+
+<script>
+const puntos = {{ puntos_json | safe }};
+const colores = {pendiente: '#a0630a', pendiente_entrega: '#6d28d9', programada: '#1d4ed8', recolectada: '#1f7a4d', incidencia: '#b3261e'};
+
+const map = L.map('mapa');
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+}).addTo(map);
+
+const markers = puntos.map(p => L.circleMarker([p.lat, p.lon], {
+  radius: 6, color: colores[p.estado] || '#666', fillColor: colores[p.estado] || '#666', fillOpacity: 0.85, weight: 1
+}).bindPopup(`<strong>${p.cliente_nombre}</strong><br>${p.direccion}<br>${p.material} · ${p.estado}${p.zona ? '<br><em>' + p.zona + '</em>' : ''}`));
+
+if (markers.length) {
+  const group = L.featureGroup(markers).addTo(map);
+  map.fitBounds(group.getBounds().pad(0.1));
+} else {
+  map.setView([19.35, -99.15], 11);
+}
+</script>
+{% endblock %}

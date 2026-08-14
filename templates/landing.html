@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Bienvenido{% endblock %}
+{% block content %}
+<div class="card auth-card" id="paso-inicial">
+  <h1 style="text-align:center;">Bienvenido a RE-PVC</h1>
+  <p style="color:var(--muted); text-align:center; margin-top:-6px;">¿Quién eres?</p>
+  <div style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
+    <button type="button" id="btn-repvc">Soy de RE-PVC</button>
+    <button type="button" class="secondary" id="btn-paciente">Soy paciente</button>
+  </div>
+</div>
+
+<div class="card auth-card" id="paso-repvc" style="display:none;">
+  <h1 style="text-align:center;">Soy de RE-PVC</h1>
+  <p style="color:var(--muted); text-align:center; margin-top:-6px;">¿Cuál es tu rol?</p>
+  <div style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
+    <a class="btn" href="{{ url_for('login', tipo='admin') }}" style="text-align:center;">Administrador</a>
+    <a class="btn" href="{{ url_for('login', tipo='recolector') }}" style="text-align:center;">Recolector</a>
+    <a class="btn" href="{{ url_for('login', tipo='nef') }}" style="text-align:center;">NEF</a>
+  </div>
+  <button type="button" class="btn-volver secondary small" style="margin-top:14px;">&larr; Volver</button>
+</div>
+
+<div class="card auth-card" id="paso-paciente" style="display:none;">
+  <h1 style="text-align:center;">Soy paciente</h1>
+  <p style="color:var(--muted); text-align:center; margin-top:-6px;">¿Ya formas parte del programa?</p>
+  <div style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
+    <a class="btn secondary" href="{{ url_for('paciente_intro') }}" style="text-align:center;">Paciente nuevo</a>
+    <a class="btn" href="{{ url_for('login', tipo='cliente') }}" style="text-align:center;">Ya soy parte del programa</a>
+  </div>
+  <button type="button" class="btn-volver secondary small" style="margin-top:14px;">&larr; Volver</button>
+</div>
+
+<script>
+document.getElementById('btn-repvc').addEventListener('click', () => {
+  document.getElementById('paso-inicial').style.display = 'none';
+  document.getElementById('paso-repvc').style.display = 'block';
+});
+document.getElementById('btn-paciente').addEventListener('click', () => {
+  document.getElementById('paso-inicial').style.display = 'none';
+  document.getElementById('paso-paciente').style.display = 'block';
+});
+document.querySelectorAll('.btn-volver').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.getElementById('paso-repvc').style.display = 'none';
+    document.getElementById('paso-paciente').style.display = 'none';
+    document.getElementById('paso-inicial').style.display = 'block';
+  });
+});
+</script>
+{% endblock %}

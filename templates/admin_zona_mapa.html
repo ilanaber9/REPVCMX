@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{{ zona }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <a href="{{ url_for('admin_dashboard', tab='solicitudes') }}" style="font-size:0.85rem;">&larr; Volver</a>
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+    <h1 style="margin:0;">{{ zona }}</h1>
+    <a class="btn small" href="{{ url_for('admin_dashboard', tab='solicitudes', zona=zona) }}">Programar esta ruta</a>
+  </div>
+  <p style="color:var(--muted); font-size:0.9rem;">{{ puntos|length }} puntos pendientes, sin programar todavía.</p>
+  {% if estimado %}
+  <p style="color:var(--muted); font-size:0.88rem;">
+    Tiempo estimado ida y vuelta desde Filiberto Gómez 279: <strong>{{ estimado['duracion'] }}</strong>
+    ({{ estimado['distancia_km'] }} km{% if estimado['puntos_sin_coords'] %}, {{ estimado['puntos_sin_coords'] }} parada(s) sin coordenadas no incluida(s){% endif %})
+    {% if estimado['fuente'] == 'linea_recta' %}<br><em>Sin conexión al servicio de rutas — estimado en línea recta, puede quedarse corto.</em>{% endif %}
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div id="mapa" style="height:380px; border-radius:8px;"></div>
+</div>
+
+<div class="card">
+  <h2>Paradas</h2>
+  {% if puntos %}
+  <ul class="checklist">
+    {% for p in puntos %}
+    <li>
+      <strong>#{{ loop.index }} — {{ p['cliente_nombre'] }}</strong>
+      {% if p['estado'] == 'pendiente_entrega' %}<span class="badge pendiente_entrega">entrega</span>{% endif %}<br>
+      {{ p['direccion'] }} · Material: {{ p['material'] }}
+      <div style="margin-top:8px;">
+        <form class="inline" method="post" action="{{ url_for('admin_eliminar_solicitud', solicitud_id=p['id']) }}"
+              onsubmit="return confirm('¿Eliminar a \'{{ p['cliente_nombre'] }}\' PARA SIEMPRE? Esto lo borra por completo del sistema, no solo de esta ruta. No se puede deshacer.');">
+          <button class="small danger" type="submit">Eliminar permanentemente</button>
+        </form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">Esta zona no tiene puntos pendientes.</p>
+  {% endif %}
+</div>
+
+<script>
+const puntos = {{ puntos_json | safe }};
+const map = L.map('mapa');
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+}).addTo(map);
+
+const depot = [19.5438982, -99.2055009];
+const depotIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:3px;background:#1c2420;border:3px solid white;box-shadow:0 0 0 2px #1c2420;"></div>',
+  iconSize: [16, 16], iconAnchor: [8, 8],
+});
+const depotMarker = L.marker(depot, {icon: depotIcon}).bindPopup('Depósito — Filiberto Gómez 279');
+
+const geometriaCalles = {{ (estimado.geometria if estimado else none) | tojson }};
+
+const conCoords = puntos.filter(p => p.lat && p.lon);
+const coords = conCoords.map(p => [p.lat, p.lon]);
+if (coords.length) {
+  const markers = conCoords.map((p, i) =>
+    L.marker([p.lat, p.lon]).bindPopup(`<strong>#${i + 1} ${p.cliente_nombre}</strong><br>${p.direccion}<br>${p.material}`)
+  );
+  const group = L.featureGroup([...markers, depotMarker]).addTo(map);
+  if (geometriaCalles) {
+    L.polyline(geometriaCalles, {color: '#1f7a4d', weight: 4}).addTo(map);
+  } else {
+    L.polyline([depot, ...coords, depot], {color: '#1f7a4d', weight: 3, dashArray: '6 6'}).addTo(map);
+  }
+  map.fitBounds(group.getBounds().pad(0.2));
+} else {
+  depotMarker.addTo(map);
+  map.setView(depot, 11);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Iniciar sesión{% endblock %}
+{% block content %}
+<div class="card auth-card">
+  <a href="{{ url_for('home') }}" style="font-size:0.85rem;">&larr; Volver</a>
+  <h1>Iniciar sesión{% if tipo_label %} — {{ tipo_label }}{% endif %}</h1>
+  <form method="post">
+    <input type="hidden" name="tipo" value="{{ tipo or '' }}">
+    <label>Correo</label>
+    <input type="email" name="email" required autofocus>
+    <label>Contraseña</label>
+    <input type="password" name="password" required>
+    <button type="submit">Entrar</button>
+  </form>
+  <p style="margin-top:10px; font-size:0.85rem;">
+    <a href="{{ url_for('olvide_password') }}">¿Olvidaste tu contraseña?</a>
+  </p>
+  {% if not tipo or tipo == 'cliente' %}
+  <p style="margin-top:16px; font-size:0.9rem; color:var(--muted);">
+    ¿Eres paciente y quieres solicitar recolecciones?
+    <a href="{{ url_for('paciente_intro') }}">Crea una cuenta</a>.
+  </p>
+  {% endif %}
+  <p style="font-size:0.82rem; color:var(--muted);">
+    Admin de prueba: admin@rutas.local / admin123
+  </p>
+</div>
+{% endblock %}

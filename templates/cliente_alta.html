@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Alta de paciente{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Dar de alta tu dirección</h1>
+  <p style="color:var(--muted); font-size:0.9rem;">Un último paso: dinos dónde te entregamos tu primer bote.</p>
+  <form method="post" action="{{ url_for('cliente_alta') }}">
+    <label>Teléfono</label>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <span style="padding:9px 10px; border:1px solid var(--border); border-radius:8px; color:var(--muted); background:#f5f5f5;">+52</span>
+      <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="10" pattern="[0-9 ]*" style="flex:1;">
+    </div>
+
+    <label>Dirección</label>
+    <input type="text" id="paciente-direccion" name="direccion" required>
+    <label>Código postal</label>
+    <input type="text" id="paciente-cp" name="codigo_postal" maxlength="5" pattern="[0-9]*" inputmode="numeric" style="max-width:160px;">
+    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+      <button type="button" class="small secondary" id="btn-buscar-direccion">Buscar en el mapa</button>
+      <button type="button" class="small secondary" id="btn-ubicacion-actual">📍 Usar mi ubicación actual</button>
+      <a class="btn secondary small" id="link-google-maps" href="#" target="_blank" rel="noopener">Ver en Google Maps</a>
+    </div>
+    <p style="background:#fff2d9; color:var(--warn); border-radius:8px; padding:10px 14px; font-weight:600; font-size:0.88rem; margin:10px 0 0;">
+      ⚠️ Revisa que el punto en el mapa marque tu ubicación real — ahí es donde se llevará a cabo la recolección.
+    </p>
+    <p id="geocodificar-estado" style="font-size:0.8rem; color:var(--muted); margin:6px 0 0;">
+      Busca la dirección y ajusta el pin si no cae en el lugar correcto, o haz clic en el mapa para marcarlo tú mismo.
+    </p>
+    <div id="resultados-direccion" style="margin-top:8px;"></div>
+    <div id="mapa-paciente" style="height:280px; border-radius:8px; margin-top:8px;"></div>
+
+    <div style="display:flex; gap:10px; margin-top:10px;">
+      <div style="flex:1;">
+        <label>Latitud (opcional)</label>
+        <input type="text" id="paciente-lat" name="lat" placeholder="19.xxxxxxx">
+      </div>
+      <div style="flex:1;">
+        <label>Longitud (opcional)</label>
+        <input type="text" id="paciente-lon" name="lon" placeholder="-99.xxxxxxx">
+      </div>
+    </div>
+
+    <button type="submit">Terminar registro</button>
+  </form>
+</div>
+
+<script>
+const mapaPaciente = L.map('mapa-paciente').setView([19.35, -99.15], 10);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+}).addTo(mapaPaciente);
+
+const latInput = document.getElementById('paciente-lat');
+const lonInput = document.getElementById('paciente-lon');
+const linkGoogle = document.getElementById('link-google-maps');
+const estado = document.getElementById('geocodificar-estado');
+let marcador = null;
+
+function ubicar(lat, lon, mover) {
+  const ll = [lat, lon];
+  if (!marcador) {
+    marcador = L.marker(ll, {draggable: true}).addTo(mapaPaciente);
+    marcador.on('dragend', () => {
+      const p = marcador.getLatLng();
+      actualizarCoords(p.lat, p.lng);
+    });
+  } else {
+    marcador.setLatLng(ll);
+  }
+  if (mover !== false) mapaPaciente.setView(ll, 16);
+  actualizarCoords(lat, lon);
+}
+
+function actualizarCoords(lat, lon) {
+  latInput.value = lat.toFixed(7);
+  lonInput.value = lon.toFixed(7);
+  linkGoogle.href = 'https://www.google.com/maps?q=' + lat + ',' + lon;
+}
+
+mapaPaciente.on('click', (e) => ubicar(e.latlng.lat, e.latlng.lng, false));
+
+const resultadosDiv = document.getElementById('resultados-direccion');
+
+function mostrarResultados(resultados) {
+  resultadosDiv.innerHTML = '';
+  if (resultados.length === 1) {
+    ubicar(resultados[0].lat, resultados[0].lon);
+    estado.textContent = 'Ubicación encontrada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
+    return;
+  }
+  estado.textContent = 'Encontramos varios lugares que podrían coincidir — elige el correcto:';
+  resultados.forEach((r) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'small secondary';
+    btn.style.display = 'block';
+    btn.style.width = '100%';
+    btn.style.textAlign = 'left';
+    btn.style.marginTop = '6px';
+    btn.textContent = r.etiqueta;
+    btn.addEventListener('click', () => {
+      ubicar(r.lat, r.lon);
+      resultadosDiv.innerHTML = '';
+      estado.textContent = 'Ubicación seleccionada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
+    });
+    resultadosDiv.appendChild(btn);
+  });
+}
+
+async function buscarDireccion() {
+  const direccion = document.getElementById('paciente-direccion').value.trim();
+  if (!direccion) {
+    estado.textContent = 'Escribe una dirección primero.';
+    return;
+  }
+  const cp = document.getElementById('paciente-cp').value.trim();
+  linkGoogle.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion);
+  estado.textContent = 'Buscando…';
+  resultadosDiv.innerHTML = '';
+  try {
+    let url = '/cliente/geocodificar?direccion=' + encodeURIComponent(direccion);
+    if (cp) url += '&cp=' + encodeURIComponent(cp);
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'No encontrado');
+    mostrarResultados(data.resultados);
+  } catch (e) {
+    estado.textContent = e.message + ' Haz clic en el mapa para marcar la ubicación exacta, o revisa en Google Maps.';
+  }
+}
+
+document.getElementById('btn-buscar-direccion').addEventListener('click', buscarDireccion);
+
+let temporizadorDireccion = null;
+function buscarDireccionAutomatico() {
+  clearTimeout(temporizadorDireccion);
+  const direccion = document.getElementById('paciente-direccion').value.trim();
+  if (direccion.length < 8) return;
+  temporizadorDireccion = setTimeout(buscarDireccion, 700);
+}
+document.getElementById('paciente-direccion').addEventListener('input', buscarDireccionAutomatico);
+document.getElementById('paciente-cp').addEventListener('input', buscarDireccionAutomatico);
+
+document.getElementById('btn-ubicacion-actual').addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    estado.textContent = 'Tu navegador no permite compartir tu ubicación. Búscala o márcala en el mapa.';
+    return;
+  }
+  resultadosDiv.innerHTML = '';
+  estado.textContent = 'Obteniendo tu ubicación…';
+  navigator.geolocation.getCurrentPosition(
+    async (posicion) => {
+      const lat = posicion.coords.latitude;
+      const lon = posicion.coords.longitude;
+      ubicar(lat, lon);
+      estado.textContent = 'Ubicación encontrada. Revisa que el pin esté en el lugar correcto.';
+      try {
+        const resp = await fetch(`/cliente/geocodificar-inverso?lat=${lat}&lon=${lon}`);
+        const data = await resp.json();
+        if (data.direccion) {
+          document.getElementById('paciente-direccion').value = data.direccion;
+        }
+      } catch (e) {
+        // si falla la dirección en texto, el pin y las coordenadas ya quedaron bien
+      }
+    },
+    () => {
+      estado.textContent = 'No pudimos obtener tu ubicación — revisa los permisos de ubicación del navegador, o búscala/márcala en el mapa.';
+    },
+    {enableHighAccuracy: true, timeout: 10000}
+  );
+});
+
+[latInput, lonInput].forEach((input) => {
+  input.addEventListener('change', () => {
+    const lat = parseFloat(latInput.value);
+    const lon = parseFloat(lonInput.value);
+    if (!isNaN(lat) && !isNaN(lon)) ubicar(lat, lon);
+  });
+});
+</script>
+{% endblock %}

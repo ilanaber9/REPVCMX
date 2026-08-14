@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Crear rutas por zona{% endblock %}
+{% block content %}
+<div class="card">
+  <a href="{{ url_for('admin_dashboard') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
+  <h1>Crear rutas por zona (masivo)</h1>
+  <p style="color:var(--muted); font-size:0.9rem;">
+    Marca las zonas que quieres convertir en ruta hoy. Cada zona se convierte en una ruta con todos sus
+    puntos pendientes, en el orden en que fueron importados.
+  </p>
+
+  {% if zonas %}
+  <form method="post">
+    <label>Fecha para todas las rutas seleccionadas</label>
+    <input type="date" name="fecha" required style="max-width:220px;">
+    <label>Hora de salida (para avisarle a los pacientes)</label>
+    <input type="time" name="hora_salida" value="08:00" required style="max-width:150px;">
+
+    <table style="margin-top:14px;">
+      <tr><th></th><th>Zona</th><th>Puntos pendientes</th><th>Recolector</th><th></th></tr>
+      {% for z in zonas %}
+      <tr>
+        <td><input type="checkbox" name="zonas" value="{{ z['zona'] }}"></td>
+        <td>{{ z['zona'] }}</td>
+        <td>{{ z['n'] }}</td>
+        <td>
+          <select name="recolector_id__{{ z['zona'] }}" style="min-width:170px;">
+            <option value="">Sin recolector (no se creará la ruta)</option>
+            {% for r in recolectores %}
+            <option value="{{ r['id'] }}">{{ r['name'] }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td>
+          <a class="btn secondary small" target="_blank" href="{{ url_for('admin_zona_mapa', zona=z['zona']) }}">Ver detalle</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    <button type="submit" style="margin-top:16px;">Crear rutas seleccionadas</button>
+  </form>
+  {% if not recolectores %}
+  <p class="empty">No hay recolectores todavía; puedes crear las rutas sin asignar y asignarlas luego.</p>
+  {% endif %}
+  {% else %}
+  <p class="empty">No hay zonas con puntos pendientes.</p>
+  {% endif %}
+</div>
+{% endblock %}

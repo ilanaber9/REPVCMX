@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ ruta['nombre'] }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <a href="{{ url_for('admin_dashboard') }}" style="font-size:0.85rem;">&larr; Volver</a>
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+    <h1 style="margin:0;">{{ ruta['nombre'] }}</h1>
+    <form method="post" action="{{ url_for('admin_eliminar_ruta', ruta_id=ruta['id']) }}"
+          onsubmit="return confirm('¿Eliminar la ruta \'{{ ruta['nombre'] }}\' de la planeación? Las paradas aún no atendidas volverán a quedar pendientes.');">
+      <button class="small danger" type="submit">Eliminar ruta</button>
+    </form>
+  </div>
+  <p>
+    Fecha: {{ ruta['fecha'] }} · Recolector: {{ ruta['recolector_nombre'] or 'sin asignar' }} ·
+    Estado: <span class="badge {{ ruta['estado'] }}">{{ ruta['estado'] }}</span>
+  </p>
+  {% if tiempo_real %}
+  <p style="font-size:0.9rem;">
+    <strong>Tiempo real: {{ tiempo_real }}</strong>{% if estimado %} · {{ estimado['distancia_km'] }} km recorridos{% endif %}
+    {% if kg_total %} · {{ "%.1f"|format(kg_total) }} kg recolectados{% endif %}
+  </p>
+  {% endif %}
+  {% if estimado %}
+  <p style="color:var(--muted); font-size:0.88rem;">
+    Tiempo estimado ida y vuelta desde Filiberto Gómez 279: <strong>{{ estimado['duracion'] }}</strong>
+    ({{ estimado['distancia_km'] }} km{% if estimado['puntos_sin_coords'] %}, {{ estimado['puntos_sin_coords'] }} parada(s) sin coordenadas no incluida(s){% endif %})
+    {% if estimado['fuente'] == 'linea_recta' %}<br><em>Sin conexión al servicio de rutas — estimado en línea recta, puede quedarse corto.</em>{% endif %}
+  </p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Mapa de la ruta</h2>
+  <div id="mapa" style="height:380px; border-radius:8px;"></div>
+</div>
+
+<div class="card">
+  <h2>Paradas</h2>
+  {% if paradas %}
+  <ul class="checklist">
+    {% for p in paradas %}
+    <li class="parada-{{ p['estado'] }}">
+      <strong>#{{ p['orden'] }} — {{ p['direccion'] }}</strong>
+      <span class="badge {{ p['estado'] }}">{{ p['estado'] }}</span>
+      {% if p['tipo'] == 'entrega' %}<span class="badge pendiente_entrega">entrega</span>{% endif %}
+      {% if p['confirmado_paciente'] == 'si' %}<span class="badge entregado">Confirmó: sí puede</span>
+      {% elif p['confirmado_paciente'] == 'no' %}<span class="badge incidencia">Confirmó: no puede</span>{% endif %}
+      {% if p['bote_a_devolver'] %}<span class="badge incidencia">🪣 Recoger bote de regreso</span>{% endif %}<br>
+      Cliente: {{ p['cliente_nombre'] }}{% if p['modalidad'] == 'compra' %} 💲{% endif %}
+      {% if p['material'] != 'PVC' %} · Material: {{ p['material'] }}{% endif %}
+      {% if p['modalidad'] %} · {{ 'Compra' if p['modalidad'] == 'compra' else 'Donación' }}{% endif %}
+      {% if p['notas_solicitud'] %}<br>Notas del cliente: {{ p['notas_solicitud'] }}{% endif %}
+      {% if p['notas'] %}<br>Notas del recolector: {{ p['notas'] }}{% endif %}
+
+      <div style="margin-top:8px;">
+        {% if p['lat'] and p['lon'] %}
+        <a class="btn secondary small" target="_blank" rel="noopener"
+           href="https://www.google.com/maps/dir/?api=1&destination={{ p['lat'] }},{{ p['lon'] }}">Google Maps</a>
+        <a class="btn secondary small" target="_blank" rel="noopener"
+           href="https://waze.com/ul?ll={{ p['lat'] }},{{ p['lon'] }}&navigate=yes">Waze</a>
+        {% else %}
+        <a class="btn secondary small" target="_blank" rel="noopener"
+           href="https://www.google.com/maps/dir/?api=1&destination={{ p['direccion'] | urlencode }}">Google Maps</a>
+        <a class="btn secondary small" target="_blank" rel="noopener"
+           href="https://waze.com/ul?q={{ p['direccion'] | urlencode }}&navigate=yes">Waze</a>
+        {% endif %}
+        <form class="inline" method="post" action="{{ url_for('admin_quitar_parada', parada_id=p['id']) }}"
+              onsubmit="return confirm('¿Quitar a \'{{ p['cliente_nombre'] }}\' de esta ruta? {% if p['estado'] == 'pendiente' %}Volverá a la lista de pendientes.{% else %}Ya tiene un resultado registrado ({{ p['estado'] }}); solo se quitará de esta ruta.{% endif %}');">
+          <button class="small danger" type="submit">Quitar de la ruta</button>
+        </form>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">Esta ruta no tiene paradas.</p>
+  {% endif %}
+</div>
+
+<script>
+const puntos = {{ paradas_json | safe }};
+const map = L.map('mapa');
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+}).addTo(map);
+
+const depot = [19.5438982, -99.2055009];
+const depotIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:16px;height:16px;border-radius:3px;background:#1c2420;border:3px solid white;box-shadow:0 0 0 2px #1c2420;"></div>',
+  iconSize: [16, 16], iconAnchor: [8, 8],
+});
+const depotMarker = L.marker(depot, {icon: depotIcon}).bindPopup('Depósito — Filiberto Gómez 279');
+
+const geometriaCalles = {{ (estimado.geometria if estimado else none) | tojson }};
+
+const coords = puntos.filter(p => p.lat && p.lon).map(p => [p.lat, p.lon]);
+if (coords.length) {
+  const markers = puntos.filter(p => p.lat && p.lon).map(p =>
+    L.marker([p.lat, p.lon]).bindPopup(`<strong>#${p.orden} ${p.cliente_nombre}</strong><br>${p.direccion}${p.material !== 'PVC' ? '<br>' + p.material : ''}`)
+  );
+  const group = L.featureGroup([...markers, depotMarker]).addTo(map);
+  if (geometriaCalles) {
+    L.polyline(geometriaCalles, {color: '#1f7a4d', weight: 4}).addTo(map);
+  } else {
+    L.polyline([depot, ...coords, depot], {color: '#1f7a4d', weight: 3, dashArray: '6 6'}).addTo(map);
+  }
+  map.fitBounds(group.getBounds().pad(0.2));
+} else {
+  depotMarker.addTo(map);
+  map.setView(depot, 11);
+}
+</script>
+{% endblock %}

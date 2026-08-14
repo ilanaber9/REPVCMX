@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Rutas de Recolección{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('home') }}">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="RE-PVC">
+    </a>
+    <div class="nav-right">
+      {% if current_user %}
+        <span>{{ current_user['name'] }} · {{ current_user['role'] }}</span>
+        <a href="{{ url_for('logout') }}">Salir</a>
+      {% endif %}
+    </div>
+  </header>
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  {% set mostrar_whatsapp = request.path.startswith('/paciente') or request.path.startswith('/registro')
+     or request.path.startswith('/cliente') or (request.path == '/login' and request.args.get('tipo') == 'cliente') %}
+  {% if mostrar_whatsapp %}
+  <a class="whatsapp-float" href="https://wa.me/525521280814" target="_blank" rel="noopener">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="26" height="26" fill="white">
+      <path d="M16.004 3C9.377 3 4 8.377 4 15.004c0 2.386.63 4.62 1.833 6.6L4 29l7.55-1.98a11.94 11.94 0 0 0 4.454.85h.005c6.627 0 12.004-5.377 12.004-12.004C28.013 8.377 22.636 3 16.004 3zm0 21.86h-.004a9.87 9.87 0 0 1-5.033-1.376l-.361-.214-3.75.984 1.001-3.655-.235-.375a9.85 9.85 0 0 1-1.51-5.22c0-5.454 4.438-9.892 9.897-9.892 2.643 0 5.126 1.03 6.994 2.9a9.83 9.83 0 0 1 2.9 6.996c0 5.454-4.438 9.852-9.899 9.852zm5.43-7.4c-.298-.149-1.762-.87-2.036-.969-.273-.099-.472-.149-.671.15-.198.297-.769.968-.943 1.167-.173.198-.347.223-.645.074-.298-.15-1.257-.464-2.394-1.478-.885-.789-1.483-1.763-1.657-2.061-.173-.298-.019-.459.13-.607.134-.133.298-.347.446-.521.15-.174.198-.298.298-.497.099-.198.05-.372-.025-.521-.074-.15-.671-1.617-.919-2.216-.242-.583-.487-.504-.671-.513-.173-.008-.372-.01-.571-.01a1.095 1.095 0 0 0-.794.372c-.273.298-1.04 1.017-1.04 2.479s1.065 2.876 1.213 3.075c.149.198 2.096 3.2 5.077 4.488.709.306 1.262.489 1.693.626.712.226 1.36.194 1.872.118.571-.085 1.762-.72 2.01-1.415.248-.694.248-1.29.174-1.414-.074-.124-.273-.198-.571-.347z"/>
+    </svg>
+    <span>¿En qué podemos ayudarte?</span>
+  </a>
+  {% endif %}
+</body>
+</html>

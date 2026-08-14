@@ -1,0 +1,357 @@
+{% extends "base.html" %}
+{% block title %}NEF{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+{% endblock %}
+{% block content %}
+<p style="color:var(--muted); font-size:0.9rem;">
+  Esto lo verán los pacientes que eligieron recibir información de NEF, en la pestaña "NEF" de su sesión.
+  Para eventos y webinars, además se les manda una invitación por correo.
+</p>
+
+<div class="tabs">
+  <button type="button" class="tab-btn" data-tab="informacion">Información</button>
+  <button type="button" class="tab-btn" data-tab="video">Video</button>
+  <button type="button" class="tab-btn" data-tab="evento">Evento</button>
+  <button type="button" class="tab-btn" data-tab="webinar">Webinar</button>
+</div>
+
+<div class="tab-panel" data-tab="informacion">
+  <div class="card">
+    <h1 style="margin:0;">Nueva información general</h1>
+    <form method="post" action="{{ url_for('nef_nueva_publicacion') }}">
+      <input type="hidden" name="tipo" value="informacion">
+      <label>Título</label>
+      <input type="text" name="titulo" required>
+      <label>Contenido</label>
+      <textarea name="contenido" rows="4" required></textarea>
+      <button type="submit">Publicar</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;">Publicado</h2>
+    {% set items = publicaciones | selectattr('tipo', 'equalto', 'informacion') | list %}
+    {% if items %}
+    <ul class="checklist">
+      {% for p in items %}
+      <li>
+        <strong>{{ p['titulo'] }}</strong><br>
+        {% if p['contenido'] %}{{ p['contenido'] }}<br>{% endif %}
+        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at'] }}</span>
+        <div style="margin-top:8px;">
+          <form method="post" action="{{ url_for('nef_eliminar_publicacion', publicacion_id=p['id']) }}"
+                onsubmit="return confirm('¿Eliminar esta publicación?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Aún no hay publicaciones.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="video">
+  <div class="card">
+    <h1 style="margin:0;">Subir video</h1>
+    <form method="post" action="{{ url_for('nef_nueva_publicacion') }}" enctype="multipart/form-data">
+      <input type="hidden" name="tipo" value="video">
+      <label>Título</label>
+      <input type="text" name="titulo" required>
+      <label>Descripción (opcional)</label>
+      <textarea name="contenido" rows="3"></textarea>
+      <label>Archivo de video</label>
+      <div class="video-dropzone" id="dropzone-nef">
+        <div id="dropzone-nef-texto"><strong>Arrastra tu video aquí</strong><br>o haz clic para seleccionarlo</div>
+        <div class="video-dropzone-archivo" id="dropzone-nef-archivo"></div>
+      </div>
+      <input type="file" name="video_archivo" id="input-video-nef" style="display:none;"
+             accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v" required>
+      <button type="submit">Subir</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;">Videos publicados</h2>
+    {% set items = publicaciones | selectattr('tipo', 'equalto', 'video') | list %}
+    {% if items %}
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px; margin-top:14px;">
+      {% for p in items %}
+      <div style="border:1px solid var(--border); border-radius:10px; overflow:hidden;">
+        {% if p['video_archivo'] %}
+        <video controls preload="metadata" style="width:100%; display:block; background:#000; aspect-ratio:9/16;">
+          <source src="{{ url_for('static', filename='videos/nef/' + p['video_archivo']) }}">
+        </video>
+        {% endif %}
+        <div style="padding:10px;">
+          <strong style="font-size:0.9rem;">{{ p['titulo'] }}</strong>
+          {% if p['contenido'] %}<p style="font-size:0.82rem; color:var(--muted); margin:4px 0;">{{ p['contenido'] }}</p>{% endif %}
+          <form method="post" action="{{ url_for('nef_eliminar_publicacion', publicacion_id=p['id']) }}"
+                onsubmit="return confirm('¿Eliminar este video?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">Aún no hay videos.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="evento">
+  <div class="card">
+    <h1 style="margin:0;">Nuevo evento</h1>
+    <form method="post" action="{{ url_for('nef_nueva_publicacion') }}">
+      <input type="hidden" name="tipo" value="evento">
+      <label>Título</label>
+      <input type="text" name="titulo" required>
+      <label>Descripción</label>
+      <textarea name="contenido" rows="3"></textarea>
+      <div style="display:flex; gap:10px;">
+        <div style="flex:1;">
+          <label>Fecha</label>
+          <input type="date" name="fecha_evento">
+        </div>
+        <div style="flex:1;">
+          <label>Hora</label>
+          <input type="time" name="hora_evento">
+        </div>
+      </div>
+      <label>Ubicación</label>
+      <input type="text" id="nef-direccion" name="lugar_evento">
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <button type="button" class="small secondary" id="btn-buscar-direccion">Buscar en el mapa</button>
+      </div>
+      <p id="geocodificar-estado" style="font-size:0.8rem; color:var(--muted); margin:6px 0 0;">
+        Busca la ubicación y ajusta el pin si no cae en el lugar correcto, o haz clic en el mapa para marcarlo tú mismo.
+      </p>
+      <div id="resultados-direccion" style="margin-top:8px;"></div>
+      <div id="mapa-nef" style="height:260px; border-radius:8px; margin-top:8px;"></div>
+      <input type="hidden" id="nef-lat" name="lat">
+      <input type="hidden" id="nef-lon" name="lon">
+      <button type="submit">Publicar evento</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;">Eventos publicados</h2>
+    {% set items = publicaciones | selectattr('tipo', 'equalto', 'evento') | list %}
+    {% if items %}
+    <ul class="checklist">
+      {% for p in items %}
+      <li>
+        <strong>{{ p['titulo'] }}</strong><br>
+        {% if p['contenido'] %}{{ p['contenido'] }}<br>{% endif %}
+        {% if p['fecha_evento'] %}Fecha: {{ p['fecha_evento'] }}{% if p['hora_evento'] %} a las {{ p['hora_evento'] }}{% endif %}<br>{% endif %}
+        {% if p['lugar_evento'] %}
+          Lugar: {{ p['lugar_evento'] }}
+          {% if p['lat'] and p['lon'] %} — <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination={{ p['lat'] }},{{ p['lon'] }}">ver en Google Maps</a>{% endif %}
+          <br>
+        {% endif %}
+        <strong>{{ p['confirmaciones'] }} confirmación(es) de asistencia.</strong><br>
+        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at'] }}</span>
+        <div style="margin-top:8px;">
+          <form method="post" action="{{ url_for('nef_eliminar_publicacion', publicacion_id=p['id']) }}"
+                onsubmit="return confirm('¿Eliminar esta publicación?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Aún no hay eventos.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="webinar">
+  <div class="card">
+    <h1 style="margin:0;">Nuevo webinar</h1>
+    <form method="post" action="{{ url_for('nef_nueva_publicacion') }}">
+      <input type="hidden" name="tipo" value="webinar">
+      <label>Título</label>
+      <input type="text" name="titulo" required>
+      <label>Descripción</label>
+      <textarea name="contenido" rows="3"></textarea>
+      <div style="display:flex; gap:10px;">
+        <div style="flex:1;">
+          <label>Fecha</label>
+          <input type="date" name="fecha_evento">
+        </div>
+        <div style="flex:1;">
+          <label>Hora</label>
+          <input type="time" name="hora_evento">
+        </div>
+      </div>
+      <label>Liga del webinar</label>
+      <input type="text" name="link_webinar" placeholder="https://..." required>
+      <button type="submit">Publicar webinar</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0;">Webinars publicados</h2>
+    {% set items = publicaciones | selectattr('tipo', 'equalto', 'webinar') | list %}
+    {% if items %}
+    <ul class="checklist">
+      {% for p in items %}
+      <li>
+        <strong>{{ p['titulo'] }}</strong><br>
+        {% if p['contenido'] %}{{ p['contenido'] }}<br>{% endif %}
+        {% if p['fecha_evento'] %}Fecha: {{ p['fecha_evento'] }}{% if p['hora_evento'] %} a las {{ p['hora_evento'] }}{% endif %}<br>{% endif %}
+        {% if p['link_webinar'] %}Liga: <a href="{{ p['link_webinar'] }}" target="_blank" rel="noopener">{{ p['link_webinar'] }}</a><br>{% endif %}
+        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at'] }}</span>
+        <div style="margin-top:8px;">
+          <form method="post" action="{{ url_for('nef_eliminar_publicacion', publicacion_id=p['id']) }}"
+                onsubmit="return confirm('¿Eliminar esta publicación?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Aún no hay webinars.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function activarTab(tab) {
+  var valido = Array.from(document.querySelectorAll('.tab-btn')).some(b => b.dataset.tab === tab);
+  if (!valido) tab = 'informacion';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
+  if (tab === 'evento' && window.invalidarMapaNef) {
+    setTimeout(window.invalidarMapaNef, 0);
+  }
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => activarTab(b.dataset.tab)));
+activarTab(new URLSearchParams(location.search).get('tab') || 'informacion');
+
+function activarDropzoneVideo(dropzoneId, textoId, archivoId, inputId) {
+  const dropzone = document.getElementById(dropzoneId);
+  const texto = document.getElementById(textoId);
+  const archivoTexto = document.getElementById(archivoId);
+  const input = document.getElementById(inputId);
+
+  function mostrarArchivo(nombre) {
+    texto.style.display = 'none';
+    archivoTexto.textContent = '📹 ' + nombre;
+  }
+
+  dropzone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    if (input.files.length) mostrarArchivo(input.files[0].name);
+  });
+  ['dragenter', 'dragover'].forEach((evento) => {
+    dropzone.addEventListener(evento, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+  });
+  ['dragleave', 'drop'].forEach((evento) => {
+    dropzone.addEventListener(evento, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    });
+  });
+  dropzone.addEventListener('drop', (e) => {
+    const archivos = e.dataTransfer.files;
+    if (archivos.length) {
+      input.files = archivos;
+      mostrarArchivo(archivos[0].name);
+    }
+  });
+}
+activarDropzoneVideo('dropzone-nef', 'dropzone-nef-texto', 'dropzone-nef-archivo', 'input-video-nef');
+
+let mapaNef = null;
+let marcadorNef = null;
+const latInput = document.getElementById('nef-lat');
+const lonInput = document.getElementById('nef-lon');
+const estado = document.getElementById('geocodificar-estado');
+
+function inicializarMapaNef() {
+  if (mapaNef) return;
+  mapaNef = L.map('mapa-nef').setView([19.35, -99.15], 10);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+  }).addTo(mapaNef);
+  mapaNef.on('click', (e) => ubicar(e.latlng.lat, e.latlng.lng));
+}
+window.invalidarMapaNef = function () {
+  inicializarMapaNef();
+  mapaNef.invalidateSize();
+};
+
+function ubicar(lat, lon) {
+  const ll = [lat, lon];
+  if (!marcadorNef) {
+    marcadorNef = L.marker(ll, {draggable: true}).addTo(mapaNef);
+    marcadorNef.on('dragend', () => {
+      const p = marcadorNef.getLatLng();
+      actualizarCoords(p.lat, p.lng);
+    });
+  } else {
+    marcadorNef.setLatLng(ll);
+  }
+  mapaNef.setView(ll, 16);
+  actualizarCoords(lat, lon);
+}
+
+function actualizarCoords(lat, lon) {
+  latInput.value = lat.toFixed(7);
+  lonInput.value = lon.toFixed(7);
+}
+
+const resultadosDiv = document.getElementById('resultados-direccion');
+
+function mostrarResultados(resultados) {
+  resultadosDiv.innerHTML = '';
+  if (resultados.length === 1) {
+    ubicar(resultados[0].lat, resultados[0].lon);
+    estado.textContent = 'Ubicación encontrada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
+    return;
+  }
+  estado.textContent = 'Encontramos varios lugares que podrían coincidir — elige el correcto:';
+  resultados.forEach((r) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'small secondary';
+    btn.style.display = 'block';
+    btn.style.width = '100%';
+    btn.style.textAlign = 'left';
+    btn.style.marginTop = '6px';
+    btn.textContent = r.etiqueta;
+    btn.addEventListener('click', () => {
+      ubicar(r.lat, r.lon);
+      resultadosDiv.innerHTML = '';
+      estado.textContent = 'Ubicación seleccionada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
+    });
+    resultadosDiv.appendChild(btn);
+  });
+}
+
+document.getElementById('btn-buscar-direccion').addEventListener('click', async () => {
+  const direccion = document.getElementById('nef-direccion').value.trim();
+  if (!direccion) {
+    estado.textContent = 'Escribe una ubicación primero.';
+    return;
+  }
+  estado.textContent = 'Buscando…';
+  resultadosDiv.innerHTML = '';
+  try {
+    const resp = await fetch('/nef/geocodificar?direccion=' + encodeURIComponent(direccion));
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'No encontrado');
+    mostrarResultados(data.resultados);
+  } catch (e) {
+    estado.textContent = e.message + ' Haz clic en el mapa para marcar la ubicación exacta.';
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Confirmar existencia{% endblock %}
+{% block content %}
+<div class="card auth-card" style="text-align:center;">
+  {% if not valido %}
+  <h1>Enlace no válido</h1>
+  <p style="color:var(--muted);">Este enlace ya no es válido o ya expiró.</p>
+  {% elif respuesta == 'si' %}
+  <h1>✅ ¡Gracias!</h1>
+  <p style="color:var(--muted);">
+    Confirmaste que sigues necesitando {{ solicitud['cantidad_cajas'] or '' }} caja(s) de {{ solicitud['material'] }}.
+    {% if solicitud['recoger_en_sitio'] %}Ya puedes pasar a recolectarlas a RE-PVC.{% else %}Tu entrega quedó programada.{% endif %}
+  </p>
+  {% elif respuesta == 'cancelar' %}
+  <h1>Solicitud cancelada</h1>
+  <p style="color:var(--muted);">
+    Cancelamos tu solicitud de {{ solicitud['cantidad_cajas'] or '' }} caja(s) de {{ solicitud['material'] }}. Si más adelante las vuelves a necesitar, puedes pedirlas de nuevo desde tu sesión.
+  </p>
+  {% elif respuesta == 'agotado' %}
+  <h1>Se nos agotaron justo antes</h1>
+  <p style="color:var(--muted);">
+    Ya no alcanza la existencia disponible — te avisaremos de nuevo en cuanto vuelva a haber.
+  </p>
+  {% else %}
+  <h1>Ya se había resuelto</h1>
+  <p style="color:var(--muted);">Esta solicitud ya quedó confirmada o cancelada anteriormente.</p>
+  {% endif %}
+  <a class="btn secondary" href="{{ url_for('home') }}" style="margin-top:16px; display:inline-block;">Ir al inicio</a>
+</div>
+{% endblock %}

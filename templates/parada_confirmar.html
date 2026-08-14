@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Confirmar recolección{% endblock %}
+{% block content %}
+<div class="card auth-card" style="text-align:center;">
+  {% if not valido %}
+  <h1>Enlace no válido</h1>
+  <p style="color:var(--muted);">Este enlace de confirmación ya no es válido o ya expiró.</p>
+  {% elif respuesta == 'si' %}
+  <h1>✅ ¡Gracias!</h1>
+  <p style="color:var(--muted);">
+    Confirmaste que sí puedes recibir la recolección el {{ parada['fecha'] }} en {{ parada['direccion'] }}.
+  </p>
+  {% else %}
+  <h1>Anotado</h1>
+  <p style="color:var(--muted);">
+    Nos avisaste que no vas a poder recibir la recolección el {{ parada['fecha'] }} en {{ parada['direccion'] }}.
+    Ya la quitamos de la ruta de hoy — te la reprogramaremos para otro día.
+  </p>
+  {% endif %}
+  <a class="btn secondary" href="{{ url_for('home') }}" style="margin-top:16px; display:inline-block;">Ir al inicio</a>
+</div>
+{% endblock %}

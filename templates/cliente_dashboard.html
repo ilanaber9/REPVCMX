@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+{% block title %}Mi cuenta{% endblock %}
+{% block content %}
+
+<div class="tabs">
+  <button type="button" class="tab-btn" data-tab="notificaciones">Notificaciones</button>
+  <button type="button" class="tab-btn" data-tab="material">Material recolectado</button>
+  <button type="button" class="tab-btn" data-tab="cajas">Mis cajas</button>
+  <button type="button" class="tab-btn" data-tab="redistribucion">Redistribución de cajas</button>
+  <button type="button" class="tab-btn" data-tab="videos">Videos</button>
+  {% if current_user['recibir_info_nef'] %}
+  <button type="button" class="tab-btn" data-tab="nef">NEF</button>
+  {% endif %}
+</div>
+
+<div class="tab-panel" data-tab="notificaciones">
+  <div class="card">
+    <h1 style="margin:0;">Mis solicitudes</h1>
+    {% if solicitudes %}
+    <table>
+      <tr><th>Fecha</th><th>Dirección</th><th>Tipo de caja</th><th>Cajas</th><th>Estado</th><th>Recolección programada</th><th>¿Puedes recibirla?</th></tr>
+      {% for s in solicitudes %}
+      <tr>
+        <td>{{ s['created_at'] }}</td>
+        <td>{{ s['direccion'] }}</td>
+        <td>
+          {% if s['tipo_redistribucion'] %}
+            {{ s['material'] }}<br>
+            <span style="color:var(--muted); font-size:0.8rem;">{{ 'Donar' if s['tipo_redistribucion'] == 'donar' else 'Recibir' }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ s['cantidad_cajas'] or '—' }}</td>
+        <td>
+          {% if s['tipo_redistribucion'] == 'material' and not s['confirmado_existencia'] and s['notificado_existencia'] and s['token_existencia'] and s['estado'] != 'cancelada' %}
+          <span class="badge programada">¡Ya hay existencia!</span>
+          <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+            <a class="btn small" href="{{ url_for('solicitud_confirmar_existencia', token=s['token_existencia'], respuesta='si') }}">Sigo necesitándolas</a>
+            <a class="btn secondary small" href="{{ url_for('solicitud_confirmar_existencia', token=s['token_existencia'], respuesta='cancelar') }}">Ya no, cancelar</a>
+          </div>
+          {% elif s['recoger_en_sitio'] and s['confirmado_existencia'] %}
+          <span class="badge programada">Listo para recoger en RE-PVC</span>
+          {% elif s['recoger_en_sitio'] %}
+          <span class="badge pendiente">Sin existencia por el momento</span>
+          {% elif s['tipo_redistribucion'] == 'material' and s['confirmado_existencia'] %}
+          <span class="badge programada">Hay existencia — entrega programada</span>
+          {% elif s['tipo_redistribucion'] == 'material' %}
+          <span class="badge pendiente">Sin existencia por el momento</span>
+          {% elif s['estado'] == 'lista_espera' and s['fuera_cobertura'] %}
+          <span class="badge pendiente">En espera de ruta</span>
+          {% else %}
+          <span class="badge {{ s['estado'] }}">{{ ESTADO_LABELS.get(s['estado'], s['estado']) }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if s['fecha_ruta'] %}
+            {{ s['fecha_ruta'] }}{% if s['horario'] %}<br><span style="color:var(--muted); font-size:0.85rem;">entre {{ s['horario'] }}</span>{% endif %}
+            <br><span style="color:var(--muted); font-size:0.85rem;">Recolector: {{ s['recolector_nombre'] or 'por asignar' }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if not s['parada_id'] %}—
+          {% elif s['confirmado_paciente'] == 'si' %}
+          <span class="badge entregado">Confirmaste: sí puedo</span>
+          {% elif s['confirmado_paciente'] == 'no' %}
+          <span class="badge incidencia">Confirmaste: no puedo</span>
+          {% else %}
+          <div style="display:flex; gap:6px;">
+            <form method="post" action="{{ url_for('cliente_confirmar_parada', parada_id=s['parada_id']) }}">
+              <input type="hidden" name="respuesta" value="si">
+              <button type="submit" class="small">Sí puedo</button>
+            </form>
+            <form method="post" action="{{ url_for('cliente_confirmar_parada', parada_id=s['parada_id']) }}">
+              <input type="hidden" name="respuesta" value="no">
+              <button type="submit" class="small danger">No puedo</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no tienes solicitudes.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="material">
+  <div class="card">
+    <h1 style="margin:0;">Material recolectado</h1>
+    <p style="font-size:2rem; font-weight:700; margin:14px 0 0;">{{ "%.1f"|format(current_user['material_recolectado_kg'] or 0) }} kg</p>
+    <p style="color:var(--muted); font-size:0.9rem;">Total de material que hemos recolectado de tu domicilio.</p>
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="cajas">
+  <div class="card">
+    <h1 style="margin:0;">Mis cajas</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Conteo de cajas que has donado y de cajas que has recibido a través de RE-PVC.</p>
+    <div style="display:flex; gap:24px; flex-wrap:wrap; margin-top:14px;">
+      <div>
+        <p style="font-size:2rem; font-weight:700; margin:0;">{{ cajas_donadas_total }}</p>
+        <p style="color:var(--muted); font-size:0.85rem; margin:2px 0 0;">Cajas donadas</p>
+      </div>
+      <div>
+        <p style="font-size:2rem; font-weight:700; margin:0;">{{ cajas_recibidas_total }}</p>
+        <p style="color:var(--muted); font-size:0.85rem; margin:2px 0 0;">Cajas recibidas</p>
+      </div>
+    </div>
+
+    {% if cajas_donadas %}
+    <h2 style="margin-top:20px;">Donadas por tipo</h2>
+    <table>
+      <tr><th>Tipo de caja</th><th>Cantidad</th></tr>
+      {% for c in cajas_donadas %}
+      <tr><td>{{ c['material'] }}</td><td>{{ c['total'] }}</td></tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if cajas_recibidas %}
+    <h2 style="margin-top:20px;">Recibidas por tipo</h2>
+    <table>
+      <tr><th>Tipo de caja</th><th>Cantidad</th></tr>
+      {% for c in cajas_recibidas %}
+      <tr><td>{{ c['material'] }}</td><td>{{ c['total'] }}</td></tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if not cajas_donadas and not cajas_recibidas %}
+    <p class="empty">Aún no tienes cajas donadas ni recibidas registradas.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="redistribucion">
+  <div class="card">
+    <h1 style="margin:0;">Redistribución de cajas</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Dinos si tienes cajas para donar o si necesitas que te hagamos llegar más.</p>
+
+    <label>¿Cómo prefieres hacerlo?</label>
+    <div class="radio-row">
+      <label><input type="radio" name="modo-entrega" value="ruta" checked> Programar ruta</label>
+      <label><input type="radio" name="modo-entrega" value="repvc"> Recolectar en RE-PVC (urgente)</label>
+    </div>
+
+    <div id="bloque-ruta">
+      <form method="post" action="{{ url_for('cliente_nueva_solicitud') }}">
+        <label>¿Qué necesitas?</label>
+        <div class="radio-row">
+          <label><input type="radio" name="tipo" value="donar" checked> Donar</label>
+          <label><input type="radio" name="tipo" value="material"> Recibir</label>
+        </div>
+
+        <label>Tipo de material</label>
+        <select name="material" required>
+          <option value="" disabled selected>Selecciona una opción</option>
+          <option value="Máquina Baxter">Máquina Baxter</option>
+          <option value="Máquina Pisa">Máquina Pisa</option>
+          <option value="Manual Baxter verde">Manual Baxter verde</option>
+          <option value="Manual Baxter amarilla">Manual Baxter amarilla</option>
+          <option value="Manual Pisa verde">Manual Pisa verde</option>
+          <option value="Manual Pisa amarilla">Manual Pisa amarilla</option>
+        </select>
+        <label>Cantidad de cajas (máximo 10 por solicitud)</label>
+        <input type="number" name="cantidad_cajas" min="1" max="10" required>
+        <button type="submit">Enviar solicitud</button>
+      </form>
+    </div>
+
+    <div id="bloque-repvc" style="display:none;">
+      <p style="color:var(--muted); font-size:0.9rem; margin-top:14px;">
+        Dinos qué necesitas y te avisaremos en cuanto confirmemos que tenemos existencia para que puedas pasar a recogerlo — sin esperar el día de tu ruta programada.
+      </p>
+      <form method="post" action="{{ url_for('cliente_nueva_solicitud') }}">
+        <input type="hidden" name="tipo" value="material">
+        <input type="hidden" name="recoger_en_sitio" value="1">
+        <label>Tipo de material</label>
+        <select name="material" required>
+          <option value="" disabled selected>Selecciona una opción</option>
+          <option value="Máquina Baxter">Máquina Baxter</option>
+          <option value="Máquina Pisa">Máquina Pisa</option>
+          <option value="Manual Baxter verde">Manual Baxter verde</option>
+          <option value="Manual Baxter amarilla">Manual Baxter amarilla</option>
+          <option value="Manual Pisa verde">Manual Pisa verde</option>
+          <option value="Manual Pisa amarilla">Manual Pisa amarilla</option>
+        </select>
+        <label>Cantidad de cajas (máximo 10 por solicitud)</label>
+        <input type="number" name="cantidad_cajas" min="1" max="10" required>
+        <button type="submit">Enviar solicitud</button>
+      </form>
+      <p style="margin-top:14px; font-size:0.85rem; color:var(--muted);">
+        Dirección: Filiberto Gómez 279, Tlaxcopan, Tlalnepantla de Baz, Estado de México, CP 54030 —
+        <a target="_blank" rel="noopener"
+           href="https://www.google.com/maps/dir/?api=1&destination={{ 'Filiberto Gómez 279, Tlaxcopan, Tlalnepantla de Baz, Estado de México, CP 54030' | urlencode }}">
+          ver en Google Maps
+        </a>
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="videos">
+  <div class="card">
+    <h1 style="margin:0;">Videos</h1>
+    {% if admin_videos %}
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:14px; margin-top:14px;">
+      {% for v in admin_videos %}
+      <div style="border:1px solid var(--border); border-radius:10px; overflow:hidden;">
+        <video controls preload="metadata" style="width:100%; display:block; background:#000; aspect-ratio:9/16;">
+          <source src="{{ url_for('static', filename='videos/admin/' + v['archivo']) }}">
+        </video>
+        <div style="padding:8px;">
+          <strong style="font-size:0.85rem;">{{ v['titulo'] }}</strong>
+          {% if v['descripcion'] %}<p style="font-size:0.78rem; color:var(--muted); margin:4px 0 0;">{{ v['descripcion'] }}</p>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty">Aún no hay videos.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if current_user['recibir_info_nef'] %}
+<div class="tab-panel" data-tab="nef">
+  {% set nef_videos = nef_publicaciones | selectattr('tipo', 'equalto', 'video') | list %}
+  {% if nef_videos %}
+  <div class="card">
+    <h1 style="margin:0;">Videos de NEF</h1>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:14px; margin-top:14px;">
+      {% for p in nef_videos %}
+      <div style="border:1px solid var(--border); border-radius:10px; overflow:hidden;">
+        {% if p['video_archivo'] %}
+        <video controls preload="metadata" style="width:100%; display:block; background:#000; aspect-ratio:9/16;">
+          <source src="{{ url_for('static', filename='videos/nef/' + p['video_archivo']) }}">
+        </video>
+        {% endif %}
+        <div style="padding:8px;">
+          <strong style="font-size:0.85rem;">{{ p['titulo'] }}</strong>
+          {% if p['contenido'] %}<p style="font-size:0.78rem; color:var(--muted); margin:4px 0 0;">{{ p['contenido'] }}</p>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h1 style="margin:0;">NEF</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Información y eventos próximos de NEF.</p>
+    {% set nef_resto = nef_publicaciones | rejectattr('tipo', 'equalto', 'video') | list %}
+    {% if nef_resto %}
+    <ul class="checklist" style="margin-top:14px;">
+      {% for p in nef_resto %}
+      <li>
+        <span class="badge {{ 'programada' if p['tipo'] in ('evento', 'webinar') else 'entregado' }}">
+          {{ 'Información' if p['tipo'] == 'informacion' else 'Evento' if p['tipo'] == 'evento' else 'Webinar' }}
+        </span>
+        <strong>{{ p['titulo'] }}</strong><br>
+        {% if p['contenido'] %}{{ p['contenido'] }}<br>{% endif %}
+        {% if p['fecha_evento'] %}Fecha: {{ p['fecha_evento'] }}{% if p['hora_evento'] %} a las {{ p['hora_evento'] }}{% endif %}<br>{% endif %}
+        {% if p['lugar_evento'] %}
+          Lugar: {{ p['lugar_evento'] }}
+          {% if p['lat'] and p['lon'] %} — <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination={{ p['lat'] }},{{ p['lon'] }}">ver en Google Maps</a>{% endif %}
+          <br>
+        {% endif %}
+        {% if p['link_webinar'] %}<a class="btn small" href="{{ p['link_webinar'] }}" target="_blank" rel="noopener">Ingresar al webinar</a><br>{% endif %}
+        <span style="color:var(--muted); font-size:0.8rem;">{{ p['created_at'] }}</span>
+        {% if p['tipo'] == 'evento' %}
+        <div style="margin-top:8px;">
+          {% if p['id'] in nef_confirmados %}
+          <span class="badge entregado">Ya confirmaste tu asistencia</span>
+          {% else %}
+          <form method="post" action="{{ url_for('cliente_confirmar_asistencia', publicacion_id=p['id']) }}">
+            <button type="submit" class="small">Confirmar asistencia</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Aún no hay publicaciones de NEF.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<script>
+document.querySelectorAll('input[name="modo-entrega"]').forEach((r) => {
+  r.addEventListener('change', () => {
+    const esRepvc = document.querySelector('input[name="modo-entrega"]:checked').value === 'repvc';
+    document.getElementById('bloque-ruta').style.display = esRepvc ? 'none' : 'block';
+    document.getElementById('bloque-repvc').style.display = esRepvc ? 'block' : 'none';
+  });
+});
+</script>
+
+<script>
+function activarTab(tab) {
+  var valido = Array.from(document.querySelectorAll('.tab-btn')).some(b => b.dataset.tab === tab);
+  if (!valido) tab = 'notificaciones';
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => activarTab(b.dataset.tab)));
+activarTab(new URLSearchParams(location.search).get('tab') || 'notificaciones');
+</script>
+{% endblock %}
