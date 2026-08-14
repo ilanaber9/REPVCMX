@@ -200,28 +200,6 @@
     </form>
   </div>
 
-  <div class="card">
-    <h2 style="margin-top:0;">Recolección en RE-PVC (esperando confirmar existencia)</h2>
-    {% if recolecciones_en_sitio %}
-    <table>
-      <tr><th>Paciente</th><th>Material</th><th>Cajas</th><th></th></tr>
-      {% for s in recolecciones_en_sitio %}
-      <tr>
-        <td>{{ s['cliente_nombre'] }}</td>
-        <td>{{ s['material'] }}</td>
-        <td>{{ s['cantidad_cajas'] or '—' }}</td>
-        <td>
-          <form method="post" action="{{ url_for('admin_confirmar_existencia', solicitud_id=s['id']) }}">
-            <button type="submit" class="small">Confirmar existencia</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-    <p class="empty">No hay solicitudes de recolección en RE-PVC esperando confirmación.</p>
-    {% endif %}
-  </div>
 </div>
 
 <div class="tab-panel" data-tab="paciente">

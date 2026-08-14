@@ -1612,12 +1612,6 @@ def admin_dashboard(user):
         ") ORDER BY s.zona IS NULL, s.zona, s.created_at"
     ).fetchall()
 
-    recolecciones_en_sitio = db.execute(
-        "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre FROM solicitudes s "
-        "LEFT JOIN users u ON u.id = s.cliente_id "
-        "WHERE s.recoger_en_sitio = 1 AND s.confirmado_existencia = 0 ORDER BY s.created_at"
-    ).fetchall()
-
     zonas = [
         row["zona"] for row in db.execute(
             "SELECT DISTINCT zona FROM solicitudes "
@@ -1857,7 +1851,6 @@ def admin_dashboard(user):
         "admin_dashboard.html",
         pendientes=solicitudes_clientes,
         pendientes_entrega=pendientes_entrega,
-        recolecciones_en_sitio=recolecciones_en_sitio,
         zonas=zonas,
         zona_actual=zona_actual,
         puntos_zona=puntos_zona,
@@ -2023,47 +2016,6 @@ def admin_marcar_bote_entregado(user, solicitud_id):
         "Sigue integrado en su ruta, ahora como punto pendiente de recolección.",
         "success",
     )
-    return redirect(url_for("admin_dashboard", tab="solicitudes"))
-
-
-@app.route("/admin/solicitudes/<int:solicitud_id>/confirmar-existencia", methods=["POST"])
-@login_required("admin")
-def admin_confirmar_existencia(user, solicitud_id):
-    db = get_db()
-    sol = db.execute(
-        "SELECT * FROM solicitudes WHERE id = ? AND recoger_en_sitio = 1", (solicitud_id,)
-    ).fetchone()
-    if sol is None:
-        flash("Esa solicitud ya no existe.", "error")
-        return redirect(url_for("admin_dashboard", tab="solicitudes"))
-
-    nombre = sol["nombre_contacto"]
-    correo_paciente = None
-    if sol["cliente_id"]:
-        u = db.execute("SELECT name, email FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
-        if u:
-            nombre = u["name"]
-            correo_paciente = u["email"]
-
-    db.execute("UPDATE solicitudes SET confirmado_existencia = 1 WHERE id = ?", (solicitud_id,))
-    if sol["cantidad_cajas"]:
-        registrar_movimiento_cajas(
-            db, sol["material"], "entrega", -sol["cantidad_cajas"],
-            f"Recolección en sitio — solicitud #{solicitud_id}",
-        )
-    db.commit()
-
-    if correo_paciente:
-        cantidad_texto = f" ({sol['cantidad_cajas']} cajas)" if sol["cantidad_cajas"] else ""
-        enviar_email(
-            correo_paciente, "Ya puedes pasar por tus cajas — RE-PVC",
-            f"Hola {nombre},\n\n"
-            f"Ya confirmamos que tenemos existencia de {sol['material']}{cantidad_texto}. "
-            "Ya puedes pasar a recolectarlas a:\n"
-            "Filiberto Gómez 279, Tlaxcopan, Tlalnepantla de Baz, Estado de México, CP 54030\n\n"
-            "Te esperamos.",
-        )
-    flash(f"Existencia confirmada para '{nombre}'. Se le avisó que ya puede pasar a recolectar.", "success")
     return redirect(url_for("admin_dashboard", tab="solicitudes"))
 
 
