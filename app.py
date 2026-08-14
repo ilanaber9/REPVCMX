@@ -3052,7 +3052,10 @@ def recolector_ver_ruta(user, ruta_id):
             tiempo_real = None
     botes_pendientes = sum(
         1 for p in paradas
-        if p["estado"] == "pendiente" and (p["tipo"] == "entrega" or p["tipo_extra"] == "entrega")
+        if p["estado"] == "pendiente" and (
+            (p["tipo"] == "entrega" and p["tipo_redistribucion"] is None)
+            or (p["tipo_extra"] == "entrega" and p["tipo_redistribucion_extra"] is None)
+        )
     )
     cajas_por_material = {}
     for p in paradas:

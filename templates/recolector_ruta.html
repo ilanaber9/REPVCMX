@@ -129,13 +129,16 @@
         {% endif %}
         {% if p['solicitud_extra_id'] %}
         <button class="small" type="submit" name="estado" value="completada">Marcar completado</button>
-        {% elif p['tipo'] == 'entrega' %}
-        <button class="small" type="submit" name="estado" value="completada">Marcar entregado</button>
+        {% elif p['tipo'] == 'entrega' and p['tipo_redistribucion'] is none %}
+        <button class="small" type="submit" name="estado" value="completada">Bote entregado</button>
+        {% elif p['tipo'] == 'entrega' and p['tipo_redistribucion'] == 'material' %}
+        <button class="small" type="submit" name="estado" value="completada">Cajas entregadas</button>
+        {% elif p['tipo_redistribucion'] == 'donar' %}
+        <button class="small" type="submit" name="estado" value="completada">Cajas recibidas</button>
         {% else %}
-        <button class="small" type="submit" name="estado" value="completada">Marcar recolectado</button>
+        <button class="small" type="submit" name="estado" value="completada">Material recolectado</button>
         {% endif %}
-        <button class="small warn" type="submit" name="estado" value="ausente">Nadie en casa</button>
-        <button class="small danger" type="submit" name="estado" value="incidencia">Reportar incidencia</button>
+        <button class="small warn" type="submit" name="estado" value="ausente">No está en casa</button>
       </form>
       {% else %}
       <div class="estado-form" style="margin-top:8px; font-size:0.85rem; color:var(--muted);">
