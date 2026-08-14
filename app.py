@@ -11,6 +11,7 @@ from datetime import time as dtime
 from email.mime.text import MIMEText
 from functools import wraps
 from math import atan2, cos, radians, sin, sqrt
+import urllib.request
 from urllib.parse import urlencode
 
 from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash
@@ -101,24 +102,43 @@ def formatear_duracion(minutos):
     return f"{mins} min"
 
 
+def _http_get(url, headers=None, timeout=8):
+    """Hace un GET y regresa el cuerpo de la respuesta (bytes), o None si falla. Intenta primero
+    con urllib (siempre disponible, no depende de que 'curl' esté instalado — importante para
+    plataformas como Render, cuya imagen puede no traer curl). Si falla —por ejemplo en Macs con
+    el Python de Apple, cuyo LibreSSL a veces no completa el handshake TLS con estos servidores—
+    cae a curl como respaldo, si está disponible."""
+    try:
+        req = urllib.request.Request(url, headers=headers or {})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except Exception:
+        pass
+    try:
+        cmd = ["curl", "-s", "--max-time", str(timeout)]
+        for k, v in (headers or {}).items():
+            cmd += ["-H", f"{k}: {v}"]
+        cmd.append(url)
+        proc = subprocess.run(cmd, capture_output=True, timeout=timeout + 2, check=True)
+        return proc.stdout
+    except Exception:
+        return None
+
+
 def osrm_distancia_duracion(secuencia):
     """secuencia: lista de (lat, lon) en orden de visita. Devuelve (km, minutos_manejo, geometria, tramos_min)
     usando calles reales (OSRM público, sin API key) o None si falla/no hay internet.
     geometria es la lista de puntos [lat, lon] que sigue la ruta real por calles, para dibujar en el mapa.
     tramos_min son los minutos de manejo (sin factor de tráfico) de cada tramo entre puntos consecutivos
-    de la secuencia, para poder calcular a qué hora se llega a cada parada.
-    Usa curl en vez de urllib: el Python del sistema (LibreSSL) no completa el handshake TLS
-    con este servidor, mientras que curl sí."""
+    de la secuencia, para poder calcular a qué hora se llega a cada parada."""
     clave = tuple(secuencia)
     if clave in _osrm_cache:
         return _osrm_cache[clave]
     coords_str = ";".join(f"{lon},{lat}" for lat, lon in secuencia)
     url = OSRM_URL.format(coords_str)
     try:
-        proc = subprocess.run(
-            ["curl", "-s", "--max-time", "8", url], capture_output=True, timeout=10, check=True
-        )
-        data = json.loads(proc.stdout)
+        body = _http_get(url, timeout=8)
+        data = json.loads(body)
         ruta = data["routes"][0]
         geometria = [[lat, lon] for lon, lat in ruta["geometry"]["coordinates"]]
         tramos_min = [leg["duration"] / 60 for leg in ruta["legs"]]
@@ -505,11 +525,8 @@ def geocodificar_direccion(direccion, limite=5, codigo_postal=None):
     query = urlencode(params)
     url = f"https://nominatim.openstreetmap.org/search?{query}"
     try:
-        proc = subprocess.run(
-            ["curl", "-s", "--max-time", "8", "-H", "User-Agent: rutas-recoleccion-app/1.0", url],
-            capture_output=True, timeout=10, check=True,
-        )
-        data = json.loads(proc.stdout)
+        body = _http_get(url, headers={"User-Agent": "rutas-recoleccion-app/1.0"}, timeout=8)
+        data = json.loads(body)
         return [
             {"lat": float(d["lat"]), "lon": float(d["lon"]), "etiqueta": d.get("display_name", direccion)}
             for d in data
@@ -524,11 +541,8 @@ def geocodificar_codigo_postal(codigo_postal, limite=5):
     query = urlencode({"postalcode": codigo_postal, "country": "Mexico", "format": "json", "limit": limite})
     url = f"https://nominatim.openstreetmap.org/search?{query}"
     try:
-        proc = subprocess.run(
-            ["curl", "-s", "--max-time", "8", "-H", "User-Agent: rutas-recoleccion-app/1.0", url],
-            capture_output=True, timeout=10, check=True,
-        )
-        data = json.loads(proc.stdout)
+        body = _http_get(url, headers={"User-Agent": "rutas-recoleccion-app/1.0"}, timeout=8)
+        data = json.loads(body)
         return [
             {"lat": float(d["lat"]), "lon": float(d["lon"]), "etiqueta": d.get("display_name", codigo_postal)}
             for d in data
@@ -543,11 +557,8 @@ def geocodificar_inverso(lat, lon):
     query = urlencode({"lat": lat, "lon": lon, "format": "json"})
     url = f"https://nominatim.openstreetmap.org/reverse?{query}"
     try:
-        proc = subprocess.run(
-            ["curl", "-s", "--max-time", "8", "-H", "User-Agent: rutas-recoleccion-app/1.0", url],
-            capture_output=True, timeout=10, check=True,
-        )
-        data = json.loads(proc.stdout)
+        body = _http_get(url, headers={"User-Agent": "rutas-recoleccion-app/1.0"}, timeout=8)
+        data = json.loads(body)
         return data.get("display_name")
     except Exception:
         return None
