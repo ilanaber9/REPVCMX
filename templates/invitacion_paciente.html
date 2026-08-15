@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Activa tu cuenta{% endblock %}
+{% block content %}
+<div class="card auth-card">
+  <h1>¡Bienvenido a RE-PVC, {{ nombre }}!</h1>
+  <p style="color:var(--muted); font-size:0.9rem;">
+    Ya te dimos de alta. Pon una contraseña para activar tu cuenta — después vas a poder completar
+    tu perfil y tu dirección de recolección.
+  </p>
+  <form method="post">
+    <label>Contraseña</label>
+    <input type="password" name="password" minlength="6" required autofocus>
+    <label>Repite la contraseña</label>
+    <input type="password" name="password2" minlength="6" required>
+    <button type="submit">Activar cuenta</button>
+  </form>
+</div>
+{% endblock %}

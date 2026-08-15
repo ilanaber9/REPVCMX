@@ -204,200 +204,21 @@
 
 <div class="tab-panel" data-tab="paciente">
   <div class="card">
-    <h1 style="margin:0;">Agregar nuevo paciente</h1>
-    <p style="color:var(--muted); font-size:0.85rem;">Todo paciente nuevo queda pendiente de que se le entregue un bote.</p>
-    <form method="post" action="{{ url_for('admin_nuevo_paciente') }}">
+    <h1 style="margin:0;">Invitar nuevo paciente</h1>
+    <p style="color:var(--muted); font-size:0.85rem;">
+      Le mandamos un correo de invitación para que cree su propia contraseña y complete su perfil
+      médico y su dirección de recolección directamente en la app — así queda inscrito con su
+      propia cuenta desde el inicio.
+    </p>
+    <form method="post" action="{{ url_for('admin_invitar_paciente') }}">
       <label>Nombre del paciente</label>
       <input type="text" name="nombre" required>
-
-      <div id="paciente-paso-1">
-        <h2 style="margin-top:20px;">Solicitud de tratamiento</h2>
-        <label>Edad</label>
-        <input type="number" name="edad" min="0" max="120" required>
-
-        <label>¿Máquina o manual?</label>
-        <select name="tipo_maquina" required>
-          <option value="" disabled selected>Selecciona una opción</option>
-          <option value="maquina">Máquina</option>
-          <option value="manual">Manual</option>
-        </select>
-
-        <label>Marca</label>
-        <select name="marca" required>
-          <option value="" disabled selected>Selecciona una opción</option>
-          <option value="baxter">Baxter</option>
-          <option value="pisa">Pisa</option>
-        </select>
-
-        <label>Frecuencia de tratamiento por semana</label>
-        <input type="number" name="frecuencia_semana" min="1" max="30" required>
-
-        <label>Causa de la enfermedad renal</label>
-        <select name="causa_enfermedad" required>
-          <option value="" disabled selected>Selecciona una opción</option>
-          <option value="diabetes">Diabetes</option>
-          <option value="hipertension">Hipertensión</option>
-          <option value="autoinmune">Enfermedad autoinmune</option>
-          <option value="desconocida">Desconocida</option>
-        </select>
-
-        <button type="button" id="btn-paciente-siguiente">Siguiente</button>
-      </div>
-
-      <div id="paciente-paso-2" style="display:none;">
-        <h2 style="margin-top:20px;">Datos de contacto</h2>
-        <label>Teléfono</label>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <span style="padding:9px 10px; border:1px solid var(--border); border-radius:8px; color:var(--muted); background:#f5f5f5;">+52</span>
-          <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="10" pattern="[0-9 ]*" style="flex:1;">
-        </div>
-
-        <label>Dirección</label>
-        <input type="text" id="paciente-direccion" name="direccion" required>
-        <label>Código postal</label>
-        <input type="text" id="paciente-cp" name="codigo_postal" maxlength="5" pattern="[0-9]*" inputmode="numeric" style="max-width:160px;">
-        <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-          <button type="button" class="small secondary" id="btn-buscar-direccion">Buscar en el mapa</button>
-          <a class="btn secondary small" id="link-google-maps" href="#" target="_blank" rel="noopener">Ver en Google Maps</a>
-        </div>
-        <p id="geocodificar-estado" style="font-size:0.8rem; color:var(--muted); margin:6px 0 0;">
-          Busca la dirección y ajusta el pin si no cae en el lugar correcto, o haz clic en el mapa para marcarlo tú mismo.
-        </p>
-        <div id="resultados-direccion" style="margin-top:8px;"></div>
-        <div id="mapa-paciente" style="height:280px; border-radius:8px; margin-top:8px;"></div>
-
-        <div style="display:flex; gap:10px; margin-top:10px;">
-          <div style="flex:1;">
-            <label>Latitud (opcional)</label>
-            <input type="text" id="paciente-lat" name="lat" placeholder="19.xxxxxxx">
-          </div>
-          <div style="flex:1;">
-            <label>Longitud (opcional)</label>
-            <input type="text" id="paciente-lon" name="lon" placeholder="-99.xxxxxxx">
-          </div>
-        </div>
-
-        <div style="display:flex; gap:10px; align-items:center;">
-          <button type="button" class="secondary" id="btn-paciente-atras">&larr; Atrás</button>
-          <button type="submit">Agregar paciente</button>
-        </div>
-      </div>
+      <label>Correo</label>
+      <input type="email" name="email" required>
+      <button type="submit">Enviar invitación</button>
     </form>
   </div>
 </div>
-
-<script>
-(function () {
-  const mapaPaciente = L.map('mapa-paciente').setView([19.35, -99.15], 10);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
-  }).addTo(mapaPaciente);
-  window.invalidarMapaPaciente = () => mapaPaciente.invalidateSize();
-
-  const latInput = document.getElementById('paciente-lat');
-  const lonInput = document.getElementById('paciente-lon');
-  const linkGoogle = document.getElementById('link-google-maps');
-  const estado = document.getElementById('geocodificar-estado');
-  let marcador = null;
-
-  function ubicar(lat, lon, mover) {
-    const ll = [lat, lon];
-    if (!marcador) {
-      marcador = L.marker(ll, {draggable: true}).addTo(mapaPaciente);
-      marcador.on('dragend', () => {
-        const p = marcador.getLatLng();
-        actualizarCoords(p.lat, p.lng);
-      });
-    } else {
-      marcador.setLatLng(ll);
-    }
-    if (mover !== false) mapaPaciente.setView(ll, 16);
-    actualizarCoords(lat, lon);
-  }
-
-  function actualizarCoords(lat, lon) {
-    latInput.value = lat.toFixed(7);
-    lonInput.value = lon.toFixed(7);
-    linkGoogle.href = 'https://www.google.com/maps?q=' + lat + ',' + lon;
-  }
-
-  mapaPaciente.on('click', (e) => ubicar(e.latlng.lat, e.latlng.lng, false));
-
-  const resultadosDiv = document.getElementById('resultados-direccion');
-
-  function mostrarResultados(resultados) {
-    resultadosDiv.innerHTML = '';
-    if (resultados.length === 1) {
-      ubicar(resultados[0].lat, resultados[0].lon);
-      estado.textContent = 'Ubicación encontrada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
-      return;
-    }
-    estado.textContent = 'Encontramos varios lugares que podrían coincidir — elige el correcto:';
-    resultados.forEach((r) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'small secondary';
-      btn.style.display = 'block';
-      btn.style.width = '100%';
-      btn.style.textAlign = 'left';
-      btn.style.marginTop = '6px';
-      btn.textContent = r.etiqueta;
-      btn.addEventListener('click', () => {
-        ubicar(r.lat, r.lon);
-        resultadosDiv.innerHTML = '';
-        estado.textContent = 'Ubicación seleccionada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
-      });
-      resultadosDiv.appendChild(btn);
-    });
-  }
-
-  document.getElementById('btn-buscar-direccion').addEventListener('click', async () => {
-    const direccion = document.getElementById('paciente-direccion').value.trim();
-    if (!direccion) {
-      estado.textContent = 'Escribe una dirección primero.';
-      return;
-    }
-    const cp = document.getElementById('paciente-cp').value.trim();
-    linkGoogle.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion);
-    estado.textContent = 'Buscando…';
-    resultadosDiv.innerHTML = '';
-    try {
-      let url = '/admin/geocodificar?direccion=' + encodeURIComponent(direccion);
-      if (cp) url += '&cp=' + encodeURIComponent(cp);
-      const resp = await fetch(url);
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || 'No encontrado');
-      mostrarResultados(data.resultados);
-    } catch (e) {
-      estado.textContent = e.message + ' Haz clic en el mapa para marcar la ubicación exacta, o revisa en Google Maps.';
-    }
-  });
-
-  [latInput, lonInput].forEach((input) => {
-    input.addEventListener('change', () => {
-      const lat = parseFloat(latInput.value);
-      const lon = parseFloat(lonInput.value);
-      if (!isNaN(lat) && !isNaN(lon)) ubicar(lat, lon);
-    });
-  });
-
-  document.getElementById('btn-paciente-siguiente').addEventListener('click', () => {
-    const paso1 = document.getElementById('paciente-paso-1');
-    const primerInvalido = Array.from(paso1.querySelectorAll('[required]')).find((el) => !el.checkValidity());
-    if (primerInvalido) {
-      primerInvalido.reportValidity();
-      return;
-    }
-    paso1.style.display = 'none';
-    document.getElementById('paciente-paso-2').style.display = 'block';
-    setTimeout(() => window.invalidarMapaPaciente(), 0);
-  });
-  document.getElementById('btn-paciente-atras').addEventListener('click', () => {
-    document.getElementById('paciente-paso-2').style.display = 'none';
-    document.getElementById('paciente-paso-1').style.display = 'block';
-  });
-})();
-</script>
 
 <div class="tab-panel" data-tab="recolectores">
   <div class="card">
@@ -1347,9 +1168,6 @@ function activarTab(tabParam) {
   if (!valido) tab = 'pacientes';
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
-  if (tab === 'paciente' && window.invalidarMapaPaciente) {
-    setTimeout(window.invalidarMapaPaciente, 0);
-  }
   var panelActivo = document.querySelector('.tab-panel[data-tab="' + tab + '"]');
   var primerSubtabBtn = panelActivo ? panelActivo.querySelector('.subtab-btn') : null;
   if (primerSubtabBtn) activarSubtab(subtabInicial || primerSubtabBtn.dataset.subtab, subtab2Inicial);

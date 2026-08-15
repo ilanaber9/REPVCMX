@@ -2143,80 +2143,86 @@ def admin_marcar_todas_notificaciones_leidas(user):
     return redirect(url_for("admin_dashboard", tab="notificaciones"))
 
 
-@app.route("/admin/pacientes/nuevo", methods=["POST"])
+@app.route("/admin/pacientes/invitar", methods=["POST"])
 @login_required("admin")
-def admin_nuevo_paciente(user):
+def admin_invitar_paciente(user):
+    """En vez de que el admin capture aquí todos los datos médicos y la dirección del paciente
+    (como se hacía antes), solo da de alta el correo y le manda una invitación: el paciente crea
+    su propia contraseña en /invitacion/<token> y de ahí lo manda el flujo normal de cliente
+    (cliente_privacidad -> cliente_bienvenida -> cliente_alta) a llenar su perfil médico y su
+    dirección él mismo — así queda inscrito con su propia cuenta desde el inicio, en vez de una
+    solicitud sin dueño (cliente_id NULL) que solo el admin puede ver/editar."""
     nombre = request.form["nombre"].strip()
-    direccion = request.form["direccion"].strip()
-    codigo_postal = request.form.get("codigo_postal", "").strip() or None
-    telefono = normalizar_telefono(request.form.get("telefono", ""))
-
-    edad = request.form.get("edad", "").strip()
-    tipo_maquina = request.form.get("tipo_maquina")
-    marca = request.form.get("marca")
-    frecuencia_semana = request.form.get("frecuencia_semana", "").strip()
-    causa_enfermedad = request.form.get("causa_enfermedad")
-
-    if tipo_maquina not in ("maquina", "manual") or marca not in ("baxter", "pisa"):
-        flash("Selecciona el tipo y la marca.", "error")
-        return redirect(url_for("admin_dashboard", tab="paciente"))
-    if causa_enfermedad not in ("diabetes", "hipertension", "autoinmune", "desconocida"):
-        flash("Selecciona la causa de la enfermedad renal.", "error")
-        return redirect(url_for("admin_dashboard", tab="paciente"))
-    try:
-        edad = int(edad)
-        frecuencia_semana = int(frecuencia_semana)
-    except ValueError:
-        flash("Edad y frecuencia deben ser números.", "error")
-        return redirect(url_for("admin_dashboard", tab="paciente"))
-
-    lat = request.form.get("lat", "").strip()
-    lon = request.form.get("lon", "").strip()
-    try:
-        lat = float(lat) if lat else None
-        lon = float(lon) if lon else None
-    except ValueError:
-        lat = lon = None
+    email = request.form["email"].strip().lower()
 
     db = get_db()
-
-    if lat is not None and lon is not None and direccion_ya_registrada(db, lat, lon):
-        flash("Esa dirección ya está registrada con otro paciente.", "error")
+    existente = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    if existente:
+        flash(f"Ese correo ya tiene una cuenta ({existente['id']}). No se envió invitación.", "error")
         return redirect(url_for("admin_dashboard", tab="paciente"))
 
-    en_espera = contar_pacientes_activos(db) >= MAX_PACIENTES_ACTIVOS
-    zona = None
-    if not en_espera and lat is not None and lon is not None:
-        cercana = zona_mas_cercana(db, lat, lon)
-        zona = cercana[0] if cercana else ZONA_BOOTSTRAP_DEFAULT
-
-    estado_inicial = "lista_espera" if en_espera else "pendiente_entrega"
-    cur = db.execute(
-        "INSERT INTO solicitudes (cliente_id, nombre_contacto, direccion, codigo_postal, telefono, "
-        "edad, tipo_maquina, marca, frecuencia_semana, causa_enfermedad, material, lat, lon, zona, estado) "
-        "VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PVC', ?, ?, ?, ?)",
-        (nombre, direccion, codigo_postal, telefono, edad, tipo_maquina, marca, frecuencia_semana,
-         causa_enfermedad, lat, lon, zona, estado_inicial),
+    token = secrets.token_urlsafe(32)
+    # Contraseña provisional e imposible de adivinar: nadie puede entrar con ella, el paciente
+    # tiene que pasar por /invitacion/<token> para poner la suya y activar la cuenta.
+    password_provisional = generate_password_hash(secrets.token_urlsafe(24), method="pbkdf2:sha256")
+    db.execute(
+        "INSERT INTO users (name, email, password_hash, role, email_verificado, verificacion_token) "
+        "VALUES (?, ?, ?, 'cliente', 0, ?)",
+        (nombre, email, password_provisional, token),
     )
-    if zona:
-        reequilibrar_rutas_zona(db, zona, cur.lastrowid)
-        zona = db.execute("SELECT zona FROM solicitudes WHERE id = ?", (cur.lastrowid,)).fetchone()["zona"]
     db.commit()
-    if en_espera:
-        flash(
-            f"Paciente '{nombre}' agregado, pero llegamos al cupo máximo de "
-            f"{MAX_PACIENTES_ACTIVOS} pacientes activos: quedó en lista de espera.",
-            "success",
-        )
-    elif zona:
-        flash(f"Paciente '{nombre}' agregado a {zona}, pendiente de entrega de bote.", "success")
+    link = url_for("invitacion_paciente", token=token, _external=True)
+    enviado = enviar_email(
+        email, "Te invitamos a RE-PVC",
+        f"Hola {nombre},\n\nTe dimos de alta en RE-PVC para que puedas programar tus recolecciones "
+        f"de material PVC desde la app. Entra a este enlace para crear tu contraseña y activar tu "
+        f"cuenta:\n{link}\n\nAhí mismo vas a poder completar tu perfil y tu dirección de recolección.\n\n"
+        "Si no esperabas este correo, ignóralo.",
+    )
+    if enviado:
+        flash(f"Se invitó a '{nombre}' — le enviamos un correo para que active su cuenta.", "success")
     else:
         flash(
-            f"Paciente '{nombre}' agregado, pendiente de entrega de bote. "
-            "No se pudo asignar a una ruta automáticamente (sin coordenadas cercanas a ninguna zona).",
-            "success",
+            f"'{nombre}' quedó registrado, pero no pudimos enviarle el correo de invitación en este "
+            "momento. Vuelve a intentar en unos minutos desde la lista de pacientes.",
+            "error",
         )
-    return redirect(url_for("admin_dashboard", tab="solicitudes"))
+    return redirect(url_for("admin_dashboard", tab="paciente"))
+
+
+@app.route("/invitacion/<token>", methods=["GET", "POST"])
+def invitacion_paciente(token):
+    """El paciente llega aquí desde el correo que le mandó admin_invitar_paciente. A diferencia
+    de verificar_correo (que solo confirma un correo que el propio paciente ya usó para
+    registrarse con su contraseña), aquí el paciente todavía no tiene contraseña — la pone en
+    este paso, y eso mismo cuenta como verificar que el correo es suyo."""
+    db = get_db()
+    user = db.execute(
+        "SELECT * FROM users WHERE verificacion_token = ? AND role = 'cliente'", (token,)
+    ).fetchone()
+    if user is None:
+        flash("Ese enlace de invitación ya no es válido.", "error")
+        return redirect(url_for("login"))
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        password2 = request.form.get("password2", "")
+        if len(password) < 6:
+            flash("La contraseña debe tener al menos 6 caracteres.", "error")
+            return render_template("invitacion_paciente.html", token=token, nombre=user["name"])
+        if password != password2:
+            flash("Las contraseñas no coinciden.", "error")
+            return render_template("invitacion_paciente.html", token=token, nombre=user["name"])
+        db.execute(
+            "UPDATE users SET password_hash = ?, email_verificado = 1, verificacion_token = NULL "
+            "WHERE id = ?",
+            (generate_password_hash(password, method="pbkdf2:sha256"), user["id"]),
+        )
+        db.commit()
+        session.clear()
+        session["user_id"] = user["id"]
+        flash("¡Cuenta activada! Termina de completar tu perfil para programar tu recolección.", "success")
+        return redirect(url_for("home"))
+    return render_template("invitacion_paciente.html", token=token, nombre=user["name"])
 
 
 @app.route("/admin/solicitudes/<int:solicitud_id>/entregar", methods=["POST"])
