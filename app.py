@@ -679,6 +679,49 @@ def geocodificar_inverso(lat, lon):
         return None
 
 
+def condicion_lista_para_recoleccion(alias=""):
+    """Fragmento SQL (booleano) que indica si una solicitud ya está lista para volver a
+    programarse: nunca se ha recolectado (fecha_reinicio_espera NULL, incluye pacientes nuevos
+    en su primera recolección) o ya pasó el intervalo que le toca según su modalidad —30 días
+    si es donación, 60 si es compra— contado desde su última recolección."""
+    p = f"{alias}." if alias else ""
+    dias_caso = f"CASE WHEN {p}modalidad = 'compra' THEN {DIAS_ESPERA_COMPRA} ELSE {DIAS_ESPERA_DONACION} END"
+    return (
+        f"({p}fecha_reinicio_espera IS NULL OR "
+        f"datetime({p}fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') <= datetime('now', 'localtime'))"
+    )
+
+
+def ordenar_por_cercania(puntos):
+    """Reordena los puntos con el heurístico del vecino más cercano, empezando desde el
+    depósito y encadenando siempre el punto no visitado más cercano al actual. Así las paradas
+    consecutivas de una ruta quedan geográficamente juntas en vez de en orden arbitrario. Los
+    puntos sin coordenadas se dejan al final, en su orden original."""
+    con_coords = [p for p in puntos if p.get("lat") is not None and p.get("lon") is not None]
+    sin_coords = [p for p in puntos if p.get("lat") is None or p.get("lon") is None]
+    restantes = con_coords[:]
+    ordenados = []
+    lat_actual, lon_actual = DEPOT_LAT, DEPOT_LON
+    while restantes:
+        siguiente = min(restantes, key=lambda p: haversine_km(lat_actual, lon_actual, p["lat"], p["lon"]))
+        ordenados.append(siguiente)
+        restantes.remove(siguiente)
+        lat_actual, lon_actual = siguiente["lat"], siguiente["lon"]
+    return ordenados + sin_coords
+
+
+def ordenar_grupo_por_cercania(grupo, minutos_max=DURACION_MAXIMA_RUTA_MIN):
+    """Aplica ordenar_por_cercania a un grupo ya armado (mismas paradas, sin agregar ni quitar
+    ninguna) para que el recorrido dentro de la ruta sea eficiente. Si por alguna razón el
+    reordenamiento resultara en una duración mayor a minutos_max, se conserva el orden
+    original en su lugar."""
+    reordenado = ordenar_por_cercania(grupo)
+    estimado = estimar_ruta(reordenado)
+    if estimado and estimado["minutos"] > minutos_max:
+        return grupo
+    return reordenado
+
+
 def zona_mas_cercana(db, lat, lon):
     """Busca, entre los puntos que ya tienen zona asignada, cuál está más cerca de (lat, lon)
     y devuelve (zona, distancia_km), o None si no hay ningún punto con zona y coordenadas."""
@@ -791,6 +834,11 @@ def reequilibrar_rutas_zona(db, zona, nueva_solicitud_id=None):
 
     if not puntos:
         return
+
+    # Reordena por cercanía real (vecino más cercano desde el depósito) antes de dividir en
+    # tandas: así, si se agregó una solicitud nueva, queda intercalada en la posición que le
+    # corresponde por cercanía en vez de ir siempre al final.
+    puntos = ordenar_por_cercania(puntos)
 
     grupos_sin_filtrar = dividir_puntos_por_duracion(puntos)
     grupos = []
@@ -921,6 +969,11 @@ def get_db():
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        # Si dos peticiones escriben casi al mismo tiempo (p. ej. un doble clic en "generar
+        # rutas"), que la segunda espere a que la primera termine su transacción en vez de fallar
+        # de inmediato con "database is locked". 20s da margen de sobra incluso cuando la primera
+        # tiene que esperar varias llamadas al servicio de mapas (OSRM) antes de guardar.
+        g.db.execute("PRAGMA busy_timeout = 20000")
     return g.db
 
 
@@ -1110,15 +1163,20 @@ def restablecer_password(token):
 
 
 def marcar_parada_ausente_por_rechazo(db, parada_id):
-    """Cuando el paciente confirma que NO va a poder recibir la recolección/entrega
-    programada, saca esa parada de la lista pendiente del recolector para ese día (queda
-    'ausente', igual que si el recolector hubiera tocado y no hubiera nadie) y regresa la(s)
-    solicitud(es) a pendiente para que se puedan reprogramar en otra ruta. No toca kg ni
-    movimientos de inventario porque no se llegó a recoger/entregar nada."""
-    parada = db.execute("SELECT * FROM paradas WHERE id = ?", (parada_id,)).fetchone()
+    """Cuando el paciente confirma DE ANTEMANO que NO va a poder recibir la recolección/entrega
+    programada (antes de que el recolector siquiera salga), la quita por completo de la ruta de
+    ese día —a diferencia de cuando el recolector llega y no encuentra a nadie, aquí ni falta
+    hacer que pase por ahí— y regresa la(s) solicitud(es) a pendiente para que se puedan
+    reprogramar en otra ruta. No toca kg ni movimientos de inventario porque no se llegó a
+    recoger/entregar nada. Devuelve (ruta_id, lat, lon, solicitud_id) de la parada eliminada —para
+    poder intentar llenar el hueco después, ya que la parada en sí ya no existe— o None si no
+    hizo nada."""
+    parada = db.execute(
+        "SELECT p.*, s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id WHERE p.id = ?",
+        (parada_id,),
+    ).fetchone()
     if parada is None or parada["estado"] != "pendiente":
-        return
-    db.execute("UPDATE paradas SET estado = 'ausente' WHERE id = ?", (parada_id,))
+        return None
     es_entrega = parada["tipo"] == "entrega"
     solicitud_estado = "pendiente_entrega" if es_entrega else "pendiente"
     db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (solicitud_estado, parada["solicitud_id"]))
@@ -1129,6 +1187,8 @@ def marcar_parada_ausente_por_rechazo(db, parada_id):
             "UPDATE solicitudes SET estado = ? WHERE id = ?",
             (solicitud_estado_extra, parada["solicitud_extra_id"]),
         )
+    db.execute("DELETE FROM paradas WHERE id = ?", (parada_id,))
+    return parada["ruta_id"], parada["lat"], parada["lon"], parada["solicitud_id"]
 
 
 @app.route("/parada/<token>/confirmar")
@@ -1147,8 +1207,15 @@ def parada_confirmar(token):
         return render_template("parada_confirmar.html", valido=False), 404
     db.execute("UPDATE paradas SET confirmado_paciente = ? WHERE id = ?", (respuesta, parada["id"]))
     if respuesta == "no":
-        marcar_parada_ausente_por_rechazo(db, parada["id"])
-    db.commit()
+        resultado = marcar_parada_ausente_por_rechazo(db, parada["id"])
+        db.commit()
+        if resultado:
+            ruta_id, lat, lon, solicitud_id = resultado
+            intentar_llenar_hueco_ausente(
+                db, ruta_id, lat, lon, request.host_url, solicitud_id_ausente=solicitud_id
+            )
+    else:
+        db.commit()
     return render_template("parada_confirmar.html", valido=True, respuesta=respuesta, parada=parada)
 
 
@@ -1217,8 +1284,15 @@ def cliente_confirmar_parada(user, parada_id):
         return redirect(url_for("cliente_dashboard"))
     db.execute("UPDATE paradas SET confirmado_paciente = ? WHERE id = ?", (respuesta, parada_id))
     if respuesta == "no":
-        marcar_parada_ausente_por_rechazo(db, parada_id)
-    db.commit()
+        resultado = marcar_parada_ausente_por_rechazo(db, parada_id)
+        db.commit()
+        if resultado:
+            ruta_id, lat, lon, solicitud_id = resultado
+            intentar_llenar_hueco_ausente(
+                db, ruta_id, lat, lon, request.host_url, solicitud_id_ausente=solicitud_id
+            )
+    else:
+        db.commit()
     flash(
         "Gracias, confirmaste que sí podrás recibir la recolección." if respuesta == "si"
         else "Gracias, avisamos que no podrás recibir la recolección ese día — se reprogramará para otro día.",
@@ -1741,10 +1815,8 @@ def admin_dashboard(user):
     solicitudes_clientes = db.execute(
         "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre FROM solicitudes s "
         "LEFT JOIN users u ON u.id = s.cliente_id "
-        "WHERE s.estado = 'pendiente' AND s.cliente_id IS NOT NULL AND ("
-        "  s.fecha_reinicio_espera IS NULL"
-        f"  OR datetime(s.fecha_reinicio_espera, '+{DIAS_ESPERA_PRIMERA_RECOLECCION} days') <= datetime('now', 'localtime')"
-        ") ORDER BY s.created_at"
+        f"WHERE s.estado = 'pendiente' AND s.cliente_id IS NOT NULL AND {condicion_lista_para_recoleccion('s')}"
+        " ORDER BY s.created_at"
     ).fetchall()
 
     pendientes_entrega = db.execute(
@@ -1765,10 +1837,8 @@ def admin_dashboard(user):
     zonas = [
         row["zona"] for row in db.execute(
             "SELECT DISTINCT zona FROM solicitudes "
-            "WHERE estado IN ('pendiente', 'pendiente_entrega') AND zona IS NOT NULL AND ("
-            "  fecha_reinicio_espera IS NULL"
-            f"  OR datetime(fecha_reinicio_espera, '+{DIAS_ESPERA_PRIMERA_RECOLECCION} days') <= datetime('now', 'localtime')"
-            ") ORDER BY zona"
+            f"WHERE estado IN ('pendiente', 'pendiente_entrega') AND zona IS NOT NULL "
+            f"AND {condicion_lista_para_recoleccion()} ORDER BY zona"
         ).fetchall()
     ]
     zona_actual = request.args.get("zona") or (zonas[0] if zonas else None)
@@ -1777,10 +1847,9 @@ def admin_dashboard(user):
         puntos_zona = db.execute(
             "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre FROM solicitudes s "
             "LEFT JOIN users u ON u.id = s.cliente_id "
-            "WHERE s.estado IN ('pendiente', 'pendiente_entrega') AND s.zona = ? AND ("
-            "  s.fecha_reinicio_espera IS NULL"
-            f"  OR datetime(s.fecha_reinicio_espera, '+{DIAS_ESPERA_PRIMERA_RECOLECCION} days') <= datetime('now', 'localtime')"
-            ") ORDER BY s.id",
+            f"WHERE s.estado IN ('pendiente', 'pendiente_entrega') AND s.zona = ? "
+            f"AND {condicion_lista_para_recoleccion('s')} "
+            "ORDER BY COALESCE(s.fecha_reinicio_espera, s.created_at)",
             (zona_actual,),
         ).fetchall()
 
@@ -2228,10 +2297,9 @@ def admin_zona_mapa(user, zona):
     puntos = db.execute(
         "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre FROM solicitudes s "
         "LEFT JOIN users u ON u.id = s.cliente_id "
-        "WHERE s.zona = ? AND s.estado IN ('pendiente', 'pendiente_entrega') AND ("
-        "  s.fecha_reinicio_espera IS NULL"
-        f"  OR datetime(s.fecha_reinicio_espera, '+{DIAS_ESPERA_PRIMERA_RECOLECCION} days') <= datetime('now', 'localtime')"
-        ") ORDER BY s.id",
+        "WHERE s.zona = ? AND s.estado IN ('pendiente', 'pendiente_entrega') "
+        f"AND {condicion_lista_para_recoleccion('s')} "
+        "ORDER BY COALESCE(s.fecha_reinicio_espera, s.created_at)",
         (zona,),
     ).fetchall()
     puntos_json = json.dumps([dict(p) for p in puntos])
@@ -2793,6 +2861,20 @@ def admin_rutas_masivas(user):
     recolectores = db.execute("SELECT * FROM users WHERE role = 'recolector' ORDER BY name").fetchall()
 
     if request.method == "POST":
+        # Toma el lock de escritura desde el inicio (antes de leer qué solicitudes están
+        # pendientes) para que, si el formulario se envía dos veces casi al mismo tiempo, la
+        # segunda petición espere a que la primera termine y confirme sus cambios, y así vea las
+        # solicitudes ya marcadas 'programada' en vez de volver a programarlas por duplicado.
+        try:
+            db.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            flash(
+                "Ya se está generando otra ruta en este momento (probablemente un envío duplicado "
+                "del mismo formulario). No se creó nada por duplicado — espera unos segundos y "
+                "revisa el panel antes de reintentar.",
+                "error",
+            )
+            return redirect(url_for("admin_dashboard"))
         zonas_seleccionadas = request.form.getlist("zonas")
         fecha = request.form.get("fecha") or date.today().isoformat()
         hora_salida = request.form.get("hora_salida") or "08:00"
@@ -2809,14 +2891,18 @@ def admin_rutas_masivas(user):
                 continue
             puntos_raw = db.execute(
                 "SELECT id, estado, lat, lon, cliente_id, direccion FROM solicitudes "
-                "WHERE estado IN ('pendiente', 'pendiente_entrega') AND zona = ? AND ("
-                "  fecha_reinicio_espera IS NULL"
-                f"  OR datetime(fecha_reinicio_espera, '+{DIAS_ESPERA_PRIMERA_RECOLECCION} days') <= datetime('now', 'localtime')"
-                ") ORDER BY id",
+                "WHERE estado IN ('pendiente', 'pendiente_entrega') AND zona = ? "
+                f"AND {condicion_lista_para_recoleccion()} "
+                "ORDER BY COALESCE(fecha_reinicio_espera, created_at)",
                 (zona,),
             ).fetchall()
             if not puntos_raw:
                 continue
+            # El orden de puntos_raw (por última recolección: quien lleva más esperando primero,
+            # y los pacientes nuevos —sin recolección previa— entran por su fecha de alta) decide
+            # en qué ruta/tanda cae cada quien cuando la zona no cabe completa en una sola ruta de
+            # 7:30 hrs. Dentro de cada tanda ya armada, ordenar_grupo_por_cercania reacomoda el
+            # recorrido por cercanía real para que el manejo sea eficiente.
             puntos = fusionar_puntos_mismo_cliente(puntos_raw)
             grupos_sin_filtrar = dividir_puntos_por_duracion(puntos)
             grupos = []
@@ -2824,7 +2910,7 @@ def admin_rutas_masivas(user):
                 grupo_filtrado, sobrantes = limitar_cajas_grupo(db, grupo_crudo)
                 solicitudes_cajas_omitidas += len(sobrantes)
                 if grupo_filtrado:
-                    grupos.append(grupo_filtrado)
+                    grupos.append(ordenar_grupo_por_cercania(grupo_filtrado))
             for idx, grupo in enumerate(grupos, start=1):
                 if idx == 1:
                     nombre_ruta = zona
@@ -2876,10 +2962,7 @@ def admin_rutas_masivas(user):
 
     zonas = db.execute(
         "SELECT zona, COUNT(*) AS n FROM solicitudes WHERE estado IN ('pendiente', 'pendiente_entrega') "
-        "AND zona IS NOT NULL AND ("
-        "  fecha_reinicio_espera IS NULL"
-        f"  OR datetime(fecha_reinicio_espera, '+{DIAS_ESPERA_PRIMERA_RECOLECCION} days') <= datetime('now', 'localtime')"
-        ") GROUP BY zona ORDER BY zona"
+        f"AND zona IS NOT NULL AND {condicion_lista_para_recoleccion()} GROUP BY zona ORDER BY zona"
     ).fetchall()
     return render_template("admin_rutas_masivas.html", zonas=zonas, recolectores=recolectores)
 
@@ -3347,6 +3430,121 @@ def _resolver_resultado_parte(db, solicitud_id, tipo, tipo_redistribucion, mater
         db.execute("UPDATE solicitudes SET estado = 'incidencia' WHERE id = ?", (solicitud_id,))
 
 
+def intentar_llenar_hueco_ausente(
+    db, ruta_id, lat_ausente, lon_ausente, host_url, excluir_parada_id=None, solicitud_id_ausente=None,
+):
+    """Cuando una parada queda 'ausente' —el recolector no encontró a nadie, o el paciente avisó
+    de antemano en la plataforma que no va a poder recibir la recolección (en cuyo caso esa
+    parada ya se eliminó y solo llega su ubicación, no su id)— revisa si añadir una parada más
+    sigue cabiendo dentro de DURACION_MAXIMA_RUTA_MIN y, si es así, busca en la misma zona al
+    paciente pendiente más cercano a esa dirección (que ya le toque recolección, y que no esté ya
+    en esta ruta) y lo agrega, para no desperdiciar el hueco que dejó. excluir_parada_id se usa
+    solo cuando la parada ausente TODAVÍA existe en la ruta (el caso del recolector) para no
+    contarla al estimar cuánto sobra ni al reacomodar; solicitud_id_ausente excluye al paciente
+    que acaba de rechazar de ser su propio "candidato cercano" —si no, como queda pendiente de
+    nuevo justo antes de esta búsqueda, se seleccionaría a sí mismo (distancia cero) y quedaría
+    otra vez en la misma ruta que acaba de rechazar. Si la ruta todavía no arranca, reacomoda
+    TODAS sus paradas por cercanía real para intercalar la nueva en la posición que le
+    corresponde; si ya está en curso, la agrega al final para no reordenar paradas ya resueltas.
+    No hace nada si la ruta ya terminó, no hay margen de tiempo, o no hay ningún candidato
+    disponible en la zona. Devuelve la dirección del paciente agregado, o None si no se agregó a
+    nadie."""
+    ruta = db.execute(
+        "SELECT nombre, zona, estado, hora_inicio_real, hora_fin_real FROM rutas WHERE id = ?", (ruta_id,)
+    ).fetchone()
+    # hora_fin_real solo se llena cuando el recolector cierra la ruta explícitamente — a
+    # diferencia de 'estado', que puede haber quedado en 'completada' nada más porque ya no
+    # quedaban paradas pendientes en ese momento, sin que la ruta esté realmente cerrada.
+    if ruta is None or ruta["hora_fin_real"] is not None or not ruta["zona"]:
+        return None
+    if lat_ausente is None or lon_ausente is None:
+        return None
+    excluir_parada_id = excluir_parada_id or -1
+
+    ids_en_ruta = set()
+    for r in db.execute(
+        "SELECT solicitud_id, solicitud_extra_id FROM paradas WHERE ruta_id = ?", (ruta_id,)
+    ).fetchall():
+        ids_en_ruta.add(r["solicitud_id"])
+        if r["solicitud_extra_id"]:
+            ids_en_ruta.add(r["solicitud_extra_id"])
+    if solicitud_id_ausente is not None:
+        ids_en_ruta.add(solicitud_id_ausente)
+
+    # Busca candidatos por la zona REAL de la ruta (ruta.zona), no por el campo zona de la
+    # solicitud ausente — así, si esa solicitud se hubiera quedado con un valor de zona viejo,
+    # de todos modos se busca y se coloca en la ruta en la que en verdad está parada.
+    candidatos = db.execute(
+        "SELECT id, estado, lat, lon, direccion FROM solicitudes WHERE zona = ? "
+        "AND estado IN ('pendiente', 'pendiente_entrega') "
+        f"AND {condicion_lista_para_recoleccion()} AND lat IS NOT NULL AND lon IS NOT NULL",
+        (ruta["zona"],),
+    ).fetchall()
+    candidatos = [c for c in candidatos if c["id"] not in ids_en_ruta]
+    if not candidatos:
+        return None
+    candidato = min(
+        candidatos, key=lambda c: haversine_km(lat_ausente, lon_ausente, c["lat"], c["lon"])
+    )
+
+    puntos_ruta = db.execute(
+        "SELECT s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+        "WHERE p.ruta_id = ? AND p.id != ? ORDER BY p.orden",
+        (ruta_id, excluir_parada_id),
+    ).fetchall()
+    puntos_prueba = [dict(p) for p in puntos_ruta] + [{"lat": candidato["lat"], "lon": candidato["lon"]}]
+    estimado = estimar_ruta(puntos_prueba)
+    if estimado and estimado["minutos"] > DURACION_MAXIMA_RUTA_MIN:
+        return None
+
+    tipo_nuevo = "entrega" if candidato["estado"] == "pendiente_entrega" else "recoleccion"
+    no_arranco = ruta["estado"] == "planificada" and ruta["hora_inicio_real"] is None
+    if no_arranco:
+        # La ruta no ha salido: mete la parada nueva y reacomoda todo el recorrido por cercanía
+        # real, para que quede en la posición que le toca en vez de siempre al final.
+        cur = db.execute(
+            "INSERT INTO paradas (ruta_id, solicitud_id, orden, tipo) VALUES (?, ?, ?, ?)",
+            (ruta_id, candidato["id"], 0, tipo_nuevo),
+        )
+        nueva_parada_id = cur.lastrowid
+        todas = [dict(p) for p in db.execute(
+            "SELECT p.id AS parada_id, s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+            "WHERE p.ruta_id = ? AND p.id != ?",
+            (ruta_id, excluir_parada_id),
+        ).fetchall()]
+        todas_ordenadas = ordenar_por_cercania(todas)
+        for i, p in enumerate(todas_ordenadas, start=1):
+            db.execute("UPDATE paradas SET orden = ? WHERE id = ?", (i, p["parada_id"]))
+        if excluir_parada_id != -1:
+            # Si la parada ausente todavía existe (caso recolector), sácala de la numeración
+            # activa (que empieza en 1) para que no comparta orden con ninguna pendiente real.
+            db.execute("UPDATE paradas SET orden = 0 WHERE id = ?", (excluir_parada_id,))
+    else:
+        # La ruta ya va en curso: se agrega al final para no reordenar paradas ya resueltas.
+        siguiente_orden = db.execute(
+            "SELECT COALESCE(MAX(orden), 0) + 1 AS n FROM paradas WHERE ruta_id = ?", (ruta_id,)
+        ).fetchone()["n"]
+        cur = db.execute(
+            "INSERT INTO paradas (ruta_id, solicitud_id, orden, tipo) VALUES (?, ?, ?, ?)",
+            (ruta_id, candidato["id"], siguiente_orden, tipo_nuevo),
+        )
+        if ruta["estado"] != "en_curso":
+            db.execute("UPDATE rutas SET estado = 'en_curso' WHERE id = ?", (ruta_id,))
+
+    # Deja la zona del paciente agregado igual a la de la ruta real donde quedó su parada —así
+    # la lista de pacientes y cualquier futuro "generar rutas" lo reconocen en su ruta real en
+    # vez de la que tenía antes de agregarse aquí.
+    db.execute(
+        "UPDATE solicitudes SET estado = 'programada', zona = ? WHERE id = ?",
+        (ruta["zona"], candidato["id"]),
+    )
+    db.commit()
+    threading.Thread(
+        target=_notificar_paradas_programadas, args=([cur.lastrowid], host_url), daemon=True
+    ).start()
+    return candidato["direccion"]
+
+
 @app.route("/recolector/paradas/<int:parada_id>/actualizar", methods=["POST"])
 @login_required("recolector")
 def recolector_actualizar_parada(user, parada_id):
@@ -3440,6 +3638,16 @@ def recolector_actualizar_parada(user, parada_id):
         threading.Thread(
             target=_notificar_siguiente_parada, args=(parada["ruta_id"],), daemon=True
         ).start()
+    if resultado == "ausente" and not resolviendo_extra:
+        sol_ausente = db.execute(
+            "SELECT lat, lon FROM solicitudes WHERE id = ?", (parada["solicitud_id"],)
+        ).fetchone()
+        direccion_agregada = intentar_llenar_hueco_ausente(
+            db, parada["ruta_id"], sol_ausente["lat"], sol_ausente["lon"], request.host_url,
+            excluir_parada_id=parada_id,
+        )
+        if direccion_agregada:
+            flash(f"Como sobraba tiempo en la ruta, se agregó una parada cercana: {direccion_agregada}.", "success")
     flash("Segunda solicitud de esta parada actualizada." if resolviendo_extra else "Parada actualizada.", "success")
     return redirect(url_for("recolector_ver_ruta", ruta_id=parada["ruta_id"]))
 

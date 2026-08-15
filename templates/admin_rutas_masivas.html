@@ -5,12 +5,13 @@
   <a href="{{ url_for('admin_dashboard') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
   <h1>Crear rutas por zona (masivo)</h1>
   <p style="color:var(--muted); font-size:0.9rem;">
-    Marca las zonas que quieres convertir en ruta hoy. Cada zona se convierte en una ruta con todos sus
-    puntos pendientes, en el orden en que fueron importados.
+    Marca las zonas que quieres convertir en ruta hoy. Cada zona se convierte en una o varias rutas
+    (según quepan en 7:30 hrs) con sus puntos pendientes, priorizando a quien lleva más tiempo
+    esperando su recolección y ordenados por cercanía real entre paradas.
   </p>
 
   {% if zonas %}
-  <form method="post">
+  <form method="post" onsubmit="if(this.dataset.enviado){return false;} this.dataset.enviado='1'; this.querySelector('button[type=submit]').disabled=true;">
     <label>Fecha para todas las rutas seleccionadas</label>
     <input type="date" name="fecha" required style="max-width:220px;">
     <label>Hora de salida (para avisarle a los pacientes)</label>

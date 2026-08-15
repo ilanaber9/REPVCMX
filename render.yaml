@@ -10,5 +10,5 @@ services:
         generateValue: true
       - key: SMTP_EMAIL
         sync: false
-      - key: SMTP_APP_PASSWORD
+      - key: BREVO_API_KEY
         sync: false
