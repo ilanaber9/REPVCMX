@@ -76,11 +76,21 @@ ACTIVIDADES_PRODUCTIVIDAD_LABELS = {
     "moler": "Moler", "cortar": "Cortar", "secar": "Secar", "envasar": "Envasar",
 }
 ZONA_BOOTSTRAP_DEFAULT = "Zona 1"
-DIAS_ESPERA_PRIMERA_RECOLECCION = 30  # tras entregar el bote, cuántos días esperar antes de que
-# el paciente aparezca listo para programar su primera recolección real de material.
+DIAS_ESPERA_DONACION = 30  # pacientes en modalidad 'donacion': cada cuántos días se vuelven a
+# programar después de su última recolección (o de entregado el bote, si es la primera).
+DIAS_ESPERA_COMPRA = 60  # pacientes en modalidad 'compra': ídem, pero cada 60 días.
 PERSONAS_VACACIONES = ["Lety", "Martin", "Gaby", "Paola", "Monserrat"]
 DIAS_VACACIONES_DEFAULT = 12
 DURACION_MAXIMA_RUTA_MIN = 7 * 60 + 30  # 7:30 hrs por ruta antes de dividirla en otra
+MIN_PARADAS_POR_RUTA = 12  # buscamos que cada ruta traiga al menos este número de pacientes,
+# para juntar más material por día y ser más rentables en vez de mandar camionetas a medio llenar
+DISTANCIA_ZONA_LEJANA_KM = 60  # en línea recta desde el depósito: más allá de esto, ya de por sí
+# hay que manejar mucho para llegar, así que conviene la excepción de abajo en vez de mandar la
+# camioneta varias veces a medio llenar
+DURACION_MAXIMA_RUTA_LEJANA_MIN = DURACION_MAXIMA_RUTA_MIN + 2 * 60  # 9:30 hrs: excepción para
+# rutas que ya de por sí incluyen algún paciente lejano (más de DISTANCIA_ZONA_LEJANA_KM del
+# depósito) — como el viaje ya es largo, conviene juntar ahí la mayor cantidad posible de
+# pacientes de esa zona aunque la ruta se pase del tope normal de 7:30
 CAJAS_MAX_POR_SOLICITUD = 10  # no caben más en la camioneta en una sola solicitud
 CAJAS_MAX_ENTREGA_RUTA = 15  # máximo de cajas a entregar (recibir) por ruta
 CAJAS_MAX_RECEPCION_RUTA = 15  # máximo de cajas a recoger (donar) por ruta
@@ -184,21 +194,110 @@ def estimar_ruta(puntos):
     }
 
 
-def dividir_puntos_por_duracion(puntos, minutos_max=DURACION_MAXIMA_RUTA_MIN):
-    """Agrupa puntos (en el orden dado) en tandas cuya duración estimada de ida y vuelta
-    al depósito no exceda minutos_max. Si un solo punto ya la excede, queda solo en su tanda."""
+def _duracion_aproximada_paquete(puntos):
+    """Estimación rápida (sin red, en línea recta) de la duración de una ruta ida y vuelta con
+    estos puntos. Se usa solo para decidir, punto por punto, cuántas paradas caben todavía en la
+    tanda que se está armando en dividir_puntos_por_duracion — llamar a estimar_ruta (que sí
+    consulta calles reales por OSRM) en cada paso sería demasiado lento con rutas de cientos de
+    paradas. Aplica FACTOR_TRAFICO como margen de seguridad porque la distancia en línea recta
+    subestima la distancia real por calles; la duración final de cada tanda ya armada se valida
+    con estimar_ruta antes de dejarla así."""
+    coords = [(p["lat"], p["lon"]) for p in puntos if p["lat"] is not None and p["lon"] is not None]
+    if not coords:
+        return len(puntos) * MINUTOS_POR_PARADA
+    secuencia = [(DEPOT_LAT, DEPOT_LON)] + coords + [(DEPOT_LAT, DEPOT_LON)]
+    km = sum(haversine_km(*secuencia[i], *secuencia[i + 1]) for i in range(len(secuencia) - 1))
+    minutos_manejo = km / VELOCIDAD_PROMEDIO_KMH * 60 * FACTOR_TRAFICO
+    return minutos_manejo + len(coords) * MINUTOS_POR_PARADA
+
+
+def _tope_efectivo_grupo(grupo, minutos_max, minutos_max_lejano):
+    """El tope de duración que le aplica a esta tanda: el extendido (zona lejana) si ya incluye
+    algún paciente a más de DISTANCIA_ZONA_LEJANA_KM en línea recta del depósito —ya que ese
+    viaje largo conviene aprovecharlo al máximo—, o el normal si no."""
+    for p in grupo:
+        if p["lat"] is None or p["lon"] is None:
+            continue
+        if haversine_km(DEPOT_LAT, DEPOT_LON, p["lat"], p["lon"]) > DISTANCIA_ZONA_LEJANA_KM:
+            return minutos_max_lejano
+    return minutos_max
+
+
+def dividir_puntos_por_duracion(
+    puntos,
+    minutos_max=DURACION_MAXIMA_RUTA_MIN,
+    min_paradas=MIN_PARADAS_POR_RUTA,
+    minutos_max_lejano=DURACION_MAXIMA_RUTA_LEJANA_MIN,
+):
+    """Agrupa puntos (en el orden dado, p. ej. por cercanía) en tandas que quepan en minutos_max
+    de manejo ida y vuelta al depósito, llenando cada tanda lo más posible antes de abrir la
+    siguiente —en vez de repartir parejo entre muchas tandas a medio llenar— para minimizar
+    cuántas rutas hacen falta y que cada una se acerque lo más posible al tope de tiempo. Si un
+    solo punto ya excede minutos_max por sí mismo, queda solo en su tanda.
+
+    Una tanda que ya incluye algún paciente lejano (ver _tope_efectivo_grupo) usa
+    minutos_max_lejano en su lugar: como ya hay que manejar lejos para llegar, conviene juntar ahí
+    a la mayor cantidad de pacientes de esa zona posible en vez de mandar la camioneta varias
+    veces a medio llenar.
+
+    Al final, si la última tanda quedó con menos de min_paradas, la funde con la anterior (o
+    reparte parejo entre ambas) para acercarlas al mínimo de pacientes por ruta que buscamos."""
+    if not puntos:
+        return []
+
     grupos = []
-    grupo_actual = []
-    for p in puntos:
-        candidato = grupo_actual + [p]
-        estimado = estimar_ruta(candidato)
-        if estimado and estimado["minutos"] > minutos_max and grupo_actual:
-            grupos.append(grupo_actual)
-            grupo_actual = [p]
+    resto = list(puntos)
+    while resto:
+        grupo = [resto.pop(0)]
+        tope = _tope_efectivo_grupo(grupo, minutos_max, minutos_max_lejano)
+        while resto:
+            candidato = grupo + [resto[0]]
+            tope = _tope_efectivo_grupo(candidato, minutos_max, minutos_max_lejano)
+            if _duracion_aproximada_paquete(candidato) > tope:
+                break
+            grupo.append(resto.pop(0))
+        grupos.append(grupo)
+
+    # Ajuste fino con duración real por calles (OSRM): la estimación rápida de arriba puede
+    # quedarse corta frente a las calles reales. Si una tanda ya armada se pasa del tope al
+    # medirla con precisión, le regresa paradas del final a la siguiente tanda (o abre una nueva
+    # si era la última) hasta que quepa.
+    idx = 0
+    while idx < len(grupos):
+        grupo = grupos[idx]
+        while len(grupo) > 1:
+            tope = _tope_efectivo_grupo(grupo, minutos_max, minutos_max_lejano)
+            estimado = estimar_ruta(grupo)
+            if not estimado or estimado["minutos"] <= tope:
+                break
+            sobrante = grupo.pop()
+            if idx + 1 < len(grupos):
+                grupos[idx + 1].insert(0, sobrante)
+            else:
+                grupos.append([sobrante])
+        idx += 1
+
+    # Si la última tanda quedó corta de pacientes, la funde con la anterior: si ambas juntas
+    # caben en una sola ruta, se combinan en una sola (menos rutas todavía, y más llena); si no
+    # caben, se reparten parejas entre las dos para que ninguna quede tan corta como la original.
+    # (Pedirle paradas de una en una solo a la tanda anterior dejaría a esa por debajo del
+    # mínimo en su lugar, sin resolver el problema.)
+    if len(grupos) > 1 and len(grupos[-1]) < min_paradas:
+        combinado = grupos[-2] + grupos[-1]
+        tope_combinado = _tope_efectivo_grupo(combinado, minutos_max, minutos_max_lejano)
+        estimado = estimar_ruta(combinado)
+        if estimado and estimado["minutos"] <= tope_combinado:
+            grupos[-2:] = [combinado]
         else:
-            grupo_actual = candidato
-    if grupo_actual:
-        grupos.append(grupo_actual)
+            mitad = len(combinado) // 2
+            nuevo_par = [combinado[:mitad], combinado[mitad:]]
+            topes_par = [_tope_efectivo_grupo(g, minutos_max, minutos_max_lejano) for g in nuevo_par]
+            if all(
+                (estimar_ruta(g) or {"minutos": 0})["minutos"] <= t
+                for g, t in zip(nuevo_par, topes_par)
+            ):
+                grupos[-2:] = nuevo_par
+
     return grupos
 
 
