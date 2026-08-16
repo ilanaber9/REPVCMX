@@ -11,6 +11,7 @@ DROP TABLE IF EXISTS inventario_cajas;
 DROP TABLE IF EXISTS productividad;
 DROP TABLE IF EXISTS vacaciones_registros;
 DROP TABLE IF EXISTS vacaciones_saldo;
+DROP TABLE IF EXISTS horas_extra;
 DROP TABLE IF EXISTS users;
 
 CREATE TABLE users (
@@ -120,6 +121,17 @@ CREATE TABLE vacaciones_registros (
   fecha_fin TEXT NOT NULL,
   dias INTEGER NOT NULL,
   notas TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE horas_extra (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recolector_id INTEGER NOT NULL REFERENCES users(id),
+  fecha TEXT NOT NULL DEFAULT (date('now','localtime')),
+  hora_inicio TEXT NOT NULL,
+  hora_salida TEXT NOT NULL,
+  horas_trabajadas REAL NOT NULL,
+  horas_extra REAL NOT NULL,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 

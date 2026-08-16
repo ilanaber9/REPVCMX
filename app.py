@@ -3213,7 +3213,45 @@ def recolector_dashboard(user):
         "FROM rutas r WHERE r.recolector_id = ? ORDER BY r.fecha DESC",
         (user["id"],),
     ).fetchall()
-    return render_template("recolector_dashboard.html", rutas=rutas)
+    horas_extra_registros = db.execute(
+        "SELECT * FROM horas_extra WHERE recolector_id = ? ORDER BY fecha DESC, hora_inicio DESC",
+        (user["id"],),
+    ).fetchall()
+    horas_extra_total = sum(r["horas_extra"] for r in horas_extra_registros)
+    return render_template(
+        "recolector_dashboard.html", rutas=rutas, hoy=date.today().isoformat(),
+        horas_extra_registros=horas_extra_registros, horas_extra_total=horas_extra_total,
+    )
+
+
+@app.route("/recolector/horas-extra", methods=["POST"])
+@login_required("recolector")
+def recolector_registrar_horas_extra(user):
+    fecha = request.form.get("fecha", "").strip()
+    hora_inicio = request.form.get("hora_inicio", "").strip()
+    hora_salida = request.form.get("hora_salida", "").strip()
+    if not fecha or not hora_inicio or not hora_salida:
+        flash("Completa la fecha, la hora de entrada y la hora de salida.", "error")
+        return redirect(url_for("recolector_dashboard"))
+    try:
+        inicio = datetime.strptime(hora_inicio, "%H:%M")
+        salida = datetime.strptime(hora_salida, "%H:%M")
+    except ValueError:
+        flash("Hora inválida.", "error")
+        return redirect(url_for("recolector_dashboard"))
+    horas_trabajadas = (salida - inicio).total_seconds() / 3600
+    if horas_trabajadas <= 0:
+        horas_trabajadas += 24  # turno que cruza medianoche
+    horas_extra = max(0, horas_trabajadas - 8)
+    db = get_db()
+    db.execute(
+        "INSERT INTO horas_extra (recolector_id, fecha, hora_inicio, hora_salida, horas_trabajadas, horas_extra) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (user["id"], fecha, hora_inicio, hora_salida, horas_trabajadas, horas_extra),
+    )
+    db.commit()
+    flash("Horas registradas.", "success")
+    return redirect(url_for("recolector_dashboard"))
 
 
 @app.route("/recolector/rutas/<int:ruta_id>")

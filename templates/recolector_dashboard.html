@@ -1,23 +1,81 @@
 {% extends "base.html" %}
 {% block title %}Mis rutas{% endblock %}
 {% block content %}
-<div class="card">
-  <h1>Mis rutas asignadas</h1>
-  {% if rutas %}
-  <table>
-    <tr><th>Nombre</th><th>Fecha</th><th>Progreso</th><th>Estado</th><th></th></tr>
-    {% for r in rutas %}
-    <tr>
-      <td>{{ r['nombre'] }}</td>
-      <td>{{ r['fecha'] }}</td>
-      <td>{{ r['paradas_hechas'] }}/{{ r['total_paradas'] }}</td>
-      <td><span class="badge {{ r['estado'] }}">{{ r['estado'] }}</span></td>
-      <td><a class="btn small" href="{{ url_for('recolector_ver_ruta', ruta_id=r['id']) }}">Ver</a></td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}
-  <p class="empty">No tienes rutas asignadas todavía.</p>
-  {% endif %}
+
+<div class="tabs">
+  <button type="button" class="tab-btn" data-tab="rutas">Mis rutas</button>
+  <button type="button" class="tab-btn" data-tab="horas-extra">Horas extra</button>
 </div>
+
+<div class="tab-panel" data-tab="rutas">
+  <div class="card">
+    <h1>Mis rutas asignadas</h1>
+    {% if rutas %}
+    <table>
+      <tr><th>Nombre</th><th>Fecha</th><th>Progreso</th><th>Estado</th><th></th></tr>
+      {% for r in rutas %}
+      <tr>
+        <td>{{ r['nombre'] }}</td>
+        <td>{{ r['fecha'] }}</td>
+        <td>{{ r['paradas_hechas'] }}/{{ r['total_paradas'] }}</td>
+        <td><span class="badge {{ r['estado'] }}">{{ r['estado'] }}</span></td>
+        <td><a class="btn small" href="{{ url_for('recolector_ver_ruta', ruta_id=r['id']) }}">Ver</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No tienes rutas asignadas todavía.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="horas-extra">
+  <div class="card">
+    <h1>Registrar horas extra</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Registra tu hora de entrada y salida de cada día. La jornada normal es de 8 horas; lo que pase de ahí se cuenta como tiempo extra.
+    </p>
+    <form method="post" action="{{ url_for('recolector_registrar_horas_extra') }}">
+      <label>Fecha</label>
+      <input type="date" name="fecha" value="{{ hoy if hoy else '' }}" required>
+      <label>Hora de entrada</label>
+      <input type="time" name="hora_inicio" required>
+      <label>Hora de salida</label>
+      <input type="time" name="hora_salida" required>
+      <button type="submit">Guardar</button>
+    </form>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h1 style="margin:0;">Mi historial</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Total de horas extra acumuladas: <strong>{{ "%.1f"|format(horas_extra_total) }}</strong>
+    </p>
+    {% if horas_extra_registros %}
+    <table>
+      <tr><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas trabajadas</th><th>Horas extra</th></tr>
+      {% for h in horas_extra_registros %}
+      <tr>
+        <td>{{ h['fecha'] }}</td>
+        <td>{{ h['hora_inicio'] }}</td>
+        <td>{{ h['hora_salida'] }}</td>
+        <td>{{ "%.1f"|format(h['horas_trabajadas']) }}</td>
+        <td>{{ "%.1f"|format(h['horas_extra']) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no tienes horas registradas.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.tab-btn').forEach(x => x.classList.toggle('active', x === b));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === b.dataset.tab));
+}));
+document.querySelector('.tab-btn[data-tab="rutas"]').classList.add('active');
+document.querySelector('.tab-panel[data-tab="rutas"]').classList.add('active');
+</script>
 {% endblock %}
