@@ -1881,6 +1881,18 @@ def admin_dashboard(user):
         rutas.append(ruta)
     recolectores = db.execute("SELECT * FROM users WHERE role = 'recolector' ORDER BY name").fetchall()
     cuentas_nef = db.execute("SELECT * FROM users WHERE role = 'nef' ORDER BY name").fetchall()
+    cuentas_admin_general = db.execute(
+        "SELECT * FROM users WHERE role = 'admin' AND es_admin_general = 1 ORDER BY name"
+    ).fetchall()
+    horas_extra_registros = db.execute(
+        "SELECT h.*, u.name AS recolector_nombre FROM horas_extra h "
+        "JOIN users u ON u.id = h.recolector_id ORDER BY h.fecha DESC, h.hora_inicio DESC"
+    ).fetchall()
+    horas_extra_por_recolector = db.execute(
+        "SELECT u.name AS recolector_nombre, COALESCE(SUM(h.horas_extra), 0) AS total "
+        "FROM users u LEFT JOIN horas_extra h ON h.recolector_id = u.id "
+        "WHERE u.role = 'recolector' GROUP BY u.id ORDER BY u.name"
+    ).fetchall()
     hoy = date.today().isoformat()
     rutas_activas = [r for r in rutas if r["estado"] != "completada"]
     rutas_finalizadas = [r for r in rutas if r["estado"] == "completada"]
@@ -2079,6 +2091,9 @@ def admin_dashboard(user):
         hoy=hoy,
         recolectores=recolectores,
         cuentas_nef=cuentas_nef,
+        cuentas_admin_general=cuentas_admin_general,
+        horas_extra_registros=horas_extra_registros,
+        horas_extra_por_recolector=horas_extra_por_recolector,
         notificaciones=notificaciones,
         notificaciones_sin_leer=notificaciones_sin_leer,
         pacientes=pacientes,
@@ -2734,6 +2749,9 @@ def admin_eliminar_productividad(user, productividad_id):
 @app.route("/admin/vacaciones/nueva", methods=["POST"])
 @login_required("admin")
 def admin_nueva_vacacion(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar vacaciones.", "error")
+        return redirect(url_for("admin_dashboard", tab="vacaciones"))
     persona = request.form.get("persona")
     fecha_inicio = request.form.get("fecha_inicio", "").strip()
     fecha_fin = request.form.get("fecha_fin", "").strip()
@@ -2764,6 +2782,9 @@ def admin_nueva_vacacion(user):
 @app.route("/admin/vacaciones/<int:vacacion_id>/eliminar", methods=["POST"])
 @login_required("admin")
 def admin_eliminar_vacacion(user, vacacion_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar vacaciones.", "error")
+        return redirect(url_for("admin_dashboard", tab="vacaciones"))
     db = get_db()
     db.execute("DELETE FROM vacaciones_registros WHERE id = ?", (vacacion_id,))
     db.commit()
@@ -2774,6 +2795,9 @@ def admin_eliminar_vacacion(user, vacacion_id):
 @app.route("/admin/vacaciones/saldo", methods=["POST"])
 @login_required("admin")
 def admin_actualizar_saldo_vacaciones(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar vacaciones.", "error")
+        return redirect(url_for("admin_dashboard", tab="vacaciones"))
     persona = request.form.get("persona")
     dias_totales = request.form.get("dias_totales", "").strip()
     if persona not in PERSONAS_VACACIONES:
@@ -3090,6 +3114,45 @@ def admin_eliminar_nef(user, user_id):
     db.execute("DELETE FROM users WHERE id = ?", (user_id,))
     db.commit()
     flash(f"Cuenta de NEF '{r['name']}' eliminada.", "success")
+    return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
+@app.route("/admin/administradores-generales/nuevo", methods=["POST"])
+@login_required("admin")
+def admin_nuevo_admin_general(user):
+    name = request.form["name"].strip()
+    email = request.form["email"].strip().lower()
+    password = request.form["password"]
+    db = get_db()
+    existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    if existing:
+        flash("Ese correo ya está registrado.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db.execute(
+        "INSERT INTO users (name, email, password_hash, role, es_admin_general) VALUES (?, ?, ?, 'admin', 1)",
+        (name, email, generate_password_hash(password, method="pbkdf2:sha256")),
+    )
+    db.commit()
+    flash(f"Cuenta de administrador general '{name}' creada.", "success")
+    return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
+@app.route("/admin/administradores-generales/<int:user_id>/eliminar", methods=["POST"])
+@login_required("admin")
+def admin_eliminar_admin_general(user, user_id):
+    db = get_db()
+    r = db.execute(
+        "SELECT * FROM users WHERE id = ? AND role = 'admin' AND es_admin_general = 1", (user_id,)
+    ).fetchone()
+    if r is None:
+        flash("Esa cuenta ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    if r["id"] == user["id"]:
+        flash("No puedes eliminar tu propia cuenta.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    db.commit()
+    flash(f"Cuenta de administrador general '{r['name']}' eliminada.", "success")
     return redirect(url_for("admin_dashboard", tab="recolectores"))
 
 

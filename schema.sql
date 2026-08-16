@@ -35,6 +35,7 @@ CREATE TABLE users (
   terminos_aceptados INTEGER NOT NULL DEFAULT 0,
   aviso_privacidad_aceptado INTEGER NOT NULL DEFAULT 0,
   recibir_info_nef INTEGER NOT NULL DEFAULT 0,
+  es_admin_general INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 

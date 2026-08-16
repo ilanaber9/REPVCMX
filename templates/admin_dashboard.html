@@ -66,6 +66,9 @@
   <button type="button" class="tab-btn" data-tab="inventarios">Inventarios</button>
   <button type="button" class="tab-btn" data-tab="productividad">Productividad del día</button>
   <button type="button" class="tab-btn" data-tab="vacaciones">Vacaciones</button>
+  {% if current_user['es_admin_general'] %}
+  <button type="button" class="tab-btn" data-tab="horas_extra">Horas extra</button>
+  {% endif %}
 </div>
 
 <div class="tab-panel" data-tab="rutas">
@@ -285,6 +288,43 @@
     </ul>
     {% else %}
     <p class="empty">Aún no hay cuentas de NEF.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h1 style="margin:0;">Crear cuenta de administrador general</h1>
+    <p style="color:var(--muted); font-size:0.85rem;">
+      El administrador general ve todo lo del administrador, y además puede ver la pestaña de "Horas extra"
+      y editar los días de vacaciones. El administrador normal solo puede ver vacaciones, no editarlas.
+    </p>
+    <form method="post" action="{{ url_for('admin_nuevo_admin_general') }}">
+      <label>Nombre</label>
+      <input type="text" name="name" required>
+      <label>Correo</label>
+      <input type="email" name="email" required>
+      <label>Contraseña</label>
+      <input type="password" name="password" required minlength="4">
+      <button type="submit">Crear administrador general</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Administradores generales activos</h2>
+    {% if cuentas_admin_general %}
+    <ul class="checklist">
+      {% for r in cuentas_admin_general %}
+      <li>
+        <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
+        <form class="inline" method="post" action="{{ url_for('admin_eliminar_admin_general', user_id=r['id']) }}"
+              style="margin-top:8px;"
+              onsubmit="return confirm('¿Dar de baja a \'{{ r['name'] }}\' como administrador general? No podrá volver a entrar.');">
+          <button type="submit" class="small danger">Dar de baja</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Aún no hay administradores generales.</p>
     {% endif %}
   </div>
 </div>
@@ -1069,6 +1109,9 @@
   <div class="card">
     <h1 style="margin:0;">Vacaciones</h1>
     <p style="color:var(--muted); font-size:0.9rem;">Días de vacaciones de cada trabajador — se van descontando conforme se registran.</p>
+    {% if not current_user['es_admin_general'] %}
+    <p style="color:var(--muted); font-size:0.85rem;">Solo el administrador general puede editar los días de vacaciones. Aquí puedes consultarlos.</p>
+    {% endif %}
     <div class="table-scroll">
     <table style="min-width:auto;">
       <tr><th>Trabajador</th><th>Días totales</th><th>Tomados</th><th>Restantes</th><th></th></tr>
@@ -1076,11 +1119,15 @@
       <tr>
         <td>{{ r['persona'] }}</td>
         <td>
+          {% if current_user['es_admin_general'] %}
           <form method="post" action="{{ url_for('admin_actualizar_saldo_vacaciones') }}" style="display:flex; gap:6px; align-items:center;">
             <input type="hidden" name="persona" value="{{ r['persona'] }}">
             <input type="number" name="dias_totales" min="0" value="{{ r['dias_totales'] }}" style="width:70px;">
             <button type="submit" class="small secondary">Guardar</button>
           </form>
+          {% else %}
+          {{ r['dias_totales'] }}
+          {% endif %}
         </td>
         <td>{{ r['dias_tomados'] }}</td>
         <td><strong>{{ r['dias_restantes'] }}</strong></td>
@@ -1090,6 +1137,7 @@
     </div>
   </div>
 
+  {% if current_user['es_admin_general'] %}
   <div class="card">
     <h2 style="margin-top:0;">Registrar vacaciones</h2>
     <form method="post" action="{{ url_for('admin_nueva_vacacion') }}">
@@ -1109,12 +1157,13 @@
       <button type="submit">Registrar</button>
     </form>
   </div>
+  {% endif %}
 
   <div class="card">
     <h2 style="margin-top:0;">Historial</h2>
     {% if vacaciones_registros %}
     <table>
-      <tr><th>Trabajador</th><th>Del</th><th>Al</th><th>Días</th><th>Notas</th><th></th></tr>
+      <tr><th>Trabajador</th><th>Del</th><th>Al</th><th>Días</th><th>Notas</th>{% if current_user['es_admin_general'] %}<th></th>{% endif %}</tr>
       {% for r in vacaciones_registros %}
       <tr>
         <td>{{ r['persona'] }}</td>
@@ -1122,12 +1171,14 @@
         <td>{{ r['fecha_fin'] }}</td>
         <td>{{ r['dias'] }}</td>
         <td>{{ r['notas'] or '—' }}</td>
+        {% if current_user['es_admin_general'] %}
         <td>
           <form method="post" action="{{ url_for('admin_eliminar_vacacion', vacacion_id=r['id']) }}"
                 onsubmit="return confirm('¿Eliminar este registro de vacaciones?');">
             <button type="submit" class="small danger">Eliminar</button>
           </form>
         </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </table>
@@ -1136,6 +1187,47 @@
     {% endif %}
   </div>
 </div>
+
+{% if current_user['es_admin_general'] %}
+<div class="tab-panel" data-tab="horas_extra">
+  <div class="card">
+    <h1 style="margin:0;">Horas extra</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Horas extra registradas por cada recolector (jornada normal: 8h/día).</p>
+    <div class="table-scroll">
+    <table style="min-width:auto;">
+      <tr><th>Recolector</th><th>Total horas extra</th></tr>
+      {% for r in horas_extra_por_recolector %}
+      <tr>
+        <td>{{ r['recolector_nombre'] }}</td>
+        <td><strong>{{ "%.1f"|format(r['total']) }}</strong></td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Historial</h2>
+    {% if horas_extra_registros %}
+    <table>
+      <tr><th>Recolector</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas trabajadas</th><th>Horas extra</th></tr>
+      {% for h in horas_extra_registros %}
+      <tr>
+        <td>{{ h['recolector_nombre'] }}</td>
+        <td>{{ h['fecha'] }}</td>
+        <td>{{ h['hora_inicio'] }}</td>
+        <td>{{ h['hora_salida'] }}</td>
+        <td>{{ "%.1f"|format(h['horas_trabajadas']) }}</td>
+        <td>{{ "%.1f"|format(h['horas_extra']) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay horas extra registradas.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 
 <script>
 const TAB_ALIAS = {
