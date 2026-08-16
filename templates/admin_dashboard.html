@@ -58,7 +58,9 @@
   <button type="button" class="tab-btn" data-tab="rutas">Rutas</button>
   <button type="button" class="tab-btn" data-tab="solicitudes">Solicitudes pendientes</button>
   <button type="button" class="tab-btn" data-tab="paciente">Agregar paciente</button>
+  {% if current_user['es_admin_general'] %}
   <button type="button" class="tab-btn" data-tab="recolectores">Alta y baja de cuentas</button>
+  {% endif %}
   <button type="button" class="tab-btn" data-tab="notificaciones">Notificaciones{% if notificaciones_sin_leer %} ({{ notificaciones_sin_leer }}){% endif %}</button>
   <button type="button" class="tab-btn" data-tab="dinero">Dinero</button>
   <button type="button" class="tab-btn" data-tab="kg">Kg recolectados</button>
@@ -224,6 +226,44 @@
 </div>
 
 <div class="tab-panel" data-tab="recolectores">
+  {% if current_user['es_admin_general'] %}
+  <div class="card">
+    <h1 style="margin:0;">Crear cuenta de administrador</h1>
+    <p style="color:var(--muted); font-size:0.85rem;">
+      El administrador puede ver todo el panel, pero no puede crear ni dar de baja cuentas, no ve la
+      pestaña de "Horas extra" y solo puede consultar las vacaciones, no editarlas.
+    </p>
+    <form method="post" action="{{ url_for('admin_nuevo_admin') }}">
+      <label>Nombre</label>
+      <input type="text" name="name" required>
+      <label>Correo</label>
+      <input type="email" name="email" required>
+      <label>Contraseña</label>
+      <input type="password" name="password" required minlength="4">
+      <button type="submit">Crear administrador</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Administradores activos</h2>
+    {% if cuentas_admin %}
+    <ul class="checklist">
+      {% for r in cuentas_admin %}
+      <li>
+        <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
+        <form class="inline" method="post" action="{{ url_for('admin_eliminar_admin', user_id=r['id']) }}"
+              style="margin-top:8px;"
+              onsubmit="return confirm('¿Dar de baja a \'{{ r['name'] }}\'? No podrá volver a entrar.');">
+          <button type="submit" class="small danger">Dar de baja</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Aún no hay administradores (aparte del general).</p>
+    {% endif %}
+  </div>
+
   <div class="card">
     <h1 style="margin:0;">Crear cuenta de recolector</h1>
     <form method="post" action="{{ url_for('admin_nuevo_recolector') }}">
@@ -292,10 +332,10 @@
   </div>
 
   <div class="card">
-    <h1 style="margin:0;">Crear cuenta de administrador general</h1>
+    <h1 style="margin:0;">Crear otra cuenta de administrador general</h1>
     <p style="color:var(--muted); font-size:0.85rem;">
-      El administrador general ve todo lo del administrador, y además puede ver la pestaña de "Horas extra"
-      y editar los días de vacaciones. El administrador normal solo puede ver vacaciones, no editarlas.
+      El administrador general es la cuenta maestra: tiene todos los permisos, incluyendo crear y dar de baja
+      cuentas de administrador, recolector y NEF, ver "Horas extra" y editar las vacaciones.
     </p>
     <form method="post" action="{{ url_for('admin_nuevo_admin_general') }}">
       <label>Nombre</label>
@@ -327,6 +367,7 @@
     <p class="empty">Aún no hay administradores generales.</p>
     {% endif %}
   </div>
+  {% endif %}
 </div>
 
 <div class="tab-panel" data-tab="notificaciones">

@@ -994,7 +994,7 @@ def init_db():
         with open(SCHEMA_PATH) as f:
             db.executescript(f.read())
         db.execute(
-            "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (name, email, password_hash, role, es_admin_general) VALUES (?, ?, ?, ?, 1)",
             ("Administrador", "admin@rutas.local", generate_password_hash("admin123", method="pbkdf2:sha256"), "admin"),
         )
         if os.path.exists(SEED_SOLICITUDES_PATH):
@@ -1884,6 +1884,9 @@ def admin_dashboard(user):
     cuentas_admin_general = db.execute(
         "SELECT * FROM users WHERE role = 'admin' AND es_admin_general = 1 ORDER BY name"
     ).fetchall()
+    cuentas_admin = db.execute(
+        "SELECT * FROM users WHERE role = 'admin' AND es_admin_general = 0 ORDER BY name"
+    ).fetchall()
     horas_extra_registros = db.execute(
         "SELECT h.*, u.name AS recolector_nombre FROM horas_extra h "
         "JOIN users u ON u.id = h.recolector_id ORDER BY h.fecha DESC, h.hora_inicio DESC"
@@ -2092,6 +2095,7 @@ def admin_dashboard(user):
         recolectores=recolectores,
         cuentas_nef=cuentas_nef,
         cuentas_admin_general=cuentas_admin_general,
+        cuentas_admin=cuentas_admin,
         horas_extra_registros=horas_extra_registros,
         horas_extra_por_recolector=horas_extra_por_recolector,
         notificaciones=notificaciones,
@@ -3038,9 +3042,54 @@ def admin_ver_ruta(user, ruta_id):
     )
 
 
+@app.route("/admin/administradores/nuevo", methods=["POST"])
+@login_required("admin")
+def admin_nuevo_admin(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede crear cuentas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    name = request.form["name"].strip()
+    email = request.form["email"].strip().lower()
+    password = request.form["password"]
+    db = get_db()
+    existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    if existing:
+        flash("Ese correo ya está registrado.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db.execute(
+        "INSERT INTO users (name, email, password_hash, role, es_admin_general) VALUES (?, ?, ?, 'admin', 0)",
+        (name, email, generate_password_hash(password, method="pbkdf2:sha256")),
+    )
+    db.commit()
+    flash(f"Cuenta de administrador '{name}' creada.", "success")
+    return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
+@app.route("/admin/administradores/<int:user_id>/eliminar", methods=["POST"])
+@login_required("admin")
+def admin_eliminar_admin(user, user_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede dar de baja cuentas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db = get_db()
+    r = db.execute(
+        "SELECT * FROM users WHERE id = ? AND role = 'admin' AND es_admin_general = 0", (user_id,)
+    ).fetchone()
+    if r is None:
+        flash("Esa cuenta ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    db.commit()
+    flash(f"Cuenta de administrador '{r['name']}' eliminada.", "success")
+    return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
 @app.route("/admin/usuarios/nuevo", methods=["POST"])
 @login_required("admin")
 def admin_nuevo_recolector(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede crear cuentas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     name = request.form["name"].strip()
     email = request.form["email"].strip().lower()
     password = request.form["password"]
@@ -3061,6 +3110,9 @@ def admin_nuevo_recolector(user):
 @app.route("/admin/usuarios/<int:user_id>/eliminar", methods=["POST"])
 @login_required("admin")
 def admin_eliminar_recolector(user, user_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede dar de baja cuentas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db = get_db()
     r = db.execute("SELECT * FROM users WHERE id = ? AND role = 'recolector'", (user_id,)).fetchone()
     if r is None:
@@ -3086,6 +3138,9 @@ def admin_eliminar_recolector(user, user_id):
 @app.route("/admin/nef/nuevo", methods=["POST"])
 @login_required("admin")
 def admin_nuevo_nef(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede crear cuentas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     name = request.form["name"].strip()
     email = request.form["email"].strip().lower()
     password = request.form["password"]
@@ -3106,6 +3161,9 @@ def admin_nuevo_nef(user):
 @app.route("/admin/nef/<int:user_id>/eliminar", methods=["POST"])
 @login_required("admin")
 def admin_eliminar_nef(user, user_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede dar de baja cuentas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db = get_db()
     r = db.execute("SELECT * FROM users WHERE id = ? AND role = 'nef'", (user_id,)).fetchone()
     if r is None:
@@ -3120,6 +3178,9 @@ def admin_eliminar_nef(user, user_id):
 @app.route("/admin/administradores-generales/nuevo", methods=["POST"])
 @login_required("admin")
 def admin_nuevo_admin_general(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede crear cuentas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     name = request.form["name"].strip()
     email = request.form["email"].strip().lower()
     password = request.form["password"]
@@ -3140,6 +3201,9 @@ def admin_nuevo_admin_general(user):
 @app.route("/admin/administradores-generales/<int:user_id>/eliminar", methods=["POST"])
 @login_required("admin")
 def admin_eliminar_admin_general(user, user_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede dar de baja cuentas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db = get_db()
     r = db.execute(
         "SELECT * FROM users WHERE id = ? AND role = 'admin' AND es_admin_general = 1", (user_id,)
