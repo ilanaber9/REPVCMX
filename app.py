@@ -3110,7 +3110,7 @@ def admin_rutas_masivas(user):
                 "recepción por ruta; quedaron pendientes para otra ruta."
             )
         flash(mensaje, "success" if not zonas_omitidas and not solicitudes_cajas_omitidas else "error")
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("admin_dashboard", tab="rutas"))
 
     zonas = db.execute(
         "SELECT zona, COUNT(*) AS n FROM solicitudes WHERE estado IN ('pendiente', 'pendiente_entrega') "
