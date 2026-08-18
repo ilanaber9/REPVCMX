@@ -251,11 +251,17 @@
       {% for r in cuentas_admin %}
       <li>
         <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
-        <form class="inline" method="post" action="{{ url_for('admin_eliminar_admin', user_id=r['id']) }}"
-              style="margin-top:8px;"
-              onsubmit="return confirm('¿Dar de baja a \'{{ r['name'] }}\'? No podrá volver a entrar.');">
-          <button type="submit" class="small danger">Dar de baja</button>
-        </form>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+          <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_admin', user_id=r['id']) }}"
+                style="display:flex; gap:6px; align-items:center;">
+            <input type="password" name="password" placeholder="Nueva contraseña" minlength="4" required style="width:150px;">
+            <button type="submit" class="small secondary">Restablecer contraseña</button>
+          </form>
+          <form class="inline" method="post" action="{{ url_for('admin_eliminar_admin', user_id=r['id']) }}"
+                onsubmit="return confirm('¿Dar de baja a \'{{ r['name'] }}\'? No podrá volver a entrar.');">
+            <button type="submit" class="small danger">Dar de baja</button>
+          </form>
+        </div>
       </li>
       {% endfor %}
     </ul>
@@ -284,11 +290,17 @@
       {% for r in recolectores %}
       <li>
         <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
-        <form class="inline" method="post" action="{{ url_for('admin_eliminar_recolector', user_id=r['id']) }}"
-              style="margin-top:8px;"
-              onsubmit="return confirm('¿Dar de baja a \'{{ r['name'] }}\'? No podrá volver a entrar.');">
-          <button type="submit" class="small danger">Dar de baja</button>
-        </form>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+          <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_recolector', user_id=r['id']) }}"
+                style="display:flex; gap:6px; align-items:center;">
+            <input type="password" name="password" placeholder="Nueva contraseña" minlength="4" required style="width:150px;">
+            <button type="submit" class="small secondary">Restablecer contraseña</button>
+          </form>
+          <form class="inline" method="post" action="{{ url_for('admin_eliminar_recolector', user_id=r['id']) }}"
+                onsubmit="return confirm('¿Dar de baja a \'{{ r['name'] }}\'? No podrá volver a entrar.');">
+            <button type="submit" class="small danger">Dar de baja</button>
+          </form>
+        </div>
       </li>
       {% endfor %}
     </ul>
@@ -318,11 +330,17 @@
       {% for r in cuentas_nef %}
       <li>
         <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
-        <form class="inline" method="post" action="{{ url_for('admin_eliminar_nef', user_id=r['id']) }}"
-              style="margin-top:8px;"
-              onsubmit="return confirm('¿Dar de baja la cuenta de NEF \'{{ r['name'] }}\'? No podrá volver a entrar.');">
-          <button type="submit" class="small danger">Dar de baja</button>
-        </form>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+          <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_nef', user_id=r['id']) }}"
+                style="display:flex; gap:6px; align-items:center;">
+            <input type="password" name="password" placeholder="Nueva contraseña" minlength="4" required style="width:150px;">
+            <button type="submit" class="small secondary">Restablecer contraseña</button>
+          </form>
+          <form class="inline" method="post" action="{{ url_for('admin_eliminar_nef', user_id=r['id']) }}"
+                onsubmit="return confirm('¿Dar de baja la cuenta de NEF \'{{ r['name'] }}\'? No podrá volver a entrar.');">
+            <button type="submit" class="small danger">Dar de baja</button>
+          </form>
+        </div>
       </li>
       {% endfor %}
     </ul>

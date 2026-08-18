@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -12,6 +13,7 @@ from datetime import time as dtime
 from email.mime.text import MIMEText
 from functools import wraps
 from math import atan2, cos, radians, sin, sqrt
+import urllib.error
 import urllib.request
 from urllib.parse import urlencode
 
@@ -622,6 +624,42 @@ def enviar_email(destinatario, asunto, cuerpo):
         return False
     finally:
         socket.getaddrinfo = getaddrinfo_original
+
+
+def enviar_whatsapp(destinatario, cuerpo):
+    """Envía un WhatsApp por la API REST de Twilio usando las credenciales de .env.
+    `destinatario` es el número en formato E.164 (ej. "+525512345678"), sin el prefijo "whatsapp:".
+    Devuelve True si Twilio aceptó el mensaje, False si falló (credenciales faltantes, número no
+    unido al sandbox, error de red, etc.)."""
+    account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+    numero_from = os.environ.get("TWILIO_WHATSAPP_FROM")
+    if not account_sid or not auth_token or not numero_from:
+        print("[enviar_whatsapp] TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_WHATSAPP_FROM no están configurados — no se envió el mensaje.")
+        return False
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+    data = urlencode(
+        {
+            "From": f"whatsapp:{numero_from}" if not numero_from.startswith("whatsapp:") else numero_from,
+            "To": f"whatsapp:{destinatario}" if not destinatario.startswith("whatsapp:") else destinatario,
+            "Body": cuerpo,
+        }
+    ).encode("utf-8")
+    credenciales = base64.b64encode(f"{account_sid}:{auth_token}".encode("utf-8")).decode("ascii")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Authorization", f"Basic {credenciales}")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+        return True
+    except urllib.error.HTTPError as e:
+        detalle = e.read().decode("utf-8", errors="replace")
+        print(f"[enviar_whatsapp] Falló el envío a {destinatario}: {e.code} {detalle}")
+        return False
+    except Exception as e:
+        print(f"[enviar_whatsapp] Falló el envío a {destinatario}: {e}")
+        return False
 
 
 def geocodificar_direccion(direccion, limite=5, codigo_postal=None):
@@ -3084,6 +3122,32 @@ def admin_eliminar_admin(user, user_id):
     return redirect(url_for("admin_dashboard", tab="recolectores"))
 
 
+@app.route("/admin/administradores/<int:user_id>/restablecer-password", methods=["POST"])
+@login_required("admin")
+def admin_restablecer_password_admin(user, user_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede restablecer contraseñas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db = get_db()
+    r = db.execute(
+        "SELECT * FROM users WHERE id = ? AND role = 'admin' AND es_admin_general = 0", (user_id,)
+    ).fetchone()
+    if r is None:
+        flash("Esa cuenta ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    password = request.form.get("password", "")
+    if len(password) < 4:
+        flash("La contraseña debe tener al menos 4 caracteres.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (generate_password_hash(password, method="pbkdf2:sha256"), user_id),
+    )
+    db.commit()
+    flash(f"Contraseña de '{r['name']}' actualizada.", "success")
+    return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
 @app.route("/admin/usuarios/nuevo", methods=["POST"])
 @login_required("admin")
 def admin_nuevo_recolector(user):
@@ -3135,6 +3199,30 @@ def admin_eliminar_recolector(user, user_id):
     return redirect(url_for("admin_dashboard", tab="recolectores"))
 
 
+@app.route("/admin/usuarios/<int:user_id>/restablecer-password", methods=["POST"])
+@login_required("admin")
+def admin_restablecer_password_recolector(user, user_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede restablecer contraseñas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db = get_db()
+    r = db.execute("SELECT * FROM users WHERE id = ? AND role = 'recolector'", (user_id,)).fetchone()
+    if r is None:
+        flash("Ese recolector ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    password = request.form.get("password", "")
+    if len(password) < 4:
+        flash("La contraseña debe tener al menos 4 caracteres.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (generate_password_hash(password, method="pbkdf2:sha256"), user_id),
+    )
+    db.commit()
+    flash(f"Contraseña de '{r['name']}' actualizada.", "success")
+    return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
 @app.route("/admin/nef/nuevo", methods=["POST"])
 @login_required("admin")
 def admin_nuevo_nef(user):
@@ -3172,6 +3260,30 @@ def admin_eliminar_nef(user, user_id):
     db.execute("DELETE FROM users WHERE id = ?", (user_id,))
     db.commit()
     flash(f"Cuenta de NEF '{r['name']}' eliminada.", "success")
+    return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
+@app.route("/admin/nef/<int:user_id>/restablecer-password", methods=["POST"])
+@login_required("admin")
+def admin_restablecer_password_nef(user, user_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede restablecer contraseñas.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db = get_db()
+    r = db.execute("SELECT * FROM users WHERE id = ? AND role = 'nef'", (user_id,)).fetchone()
+    if r is None:
+        flash("Esa cuenta de NEF ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    password = request.form.get("password", "")
+    if len(password) < 4:
+        flash("La contraseña debe tener al menos 4 caracteres.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (generate_password_hash(password, method="pbkdf2:sha256"), user_id),
+    )
+    db.commit()
+    flash(f"Contraseña de '{r['name']}' actualizada.", "success")
     return redirect(url_for("admin_dashboard", tab="recolectores"))
 
 
@@ -4037,6 +4149,25 @@ def cliente_confirmar_asistencia(user, publicacion_id):
     db.commit()
     flash(f"Confirmaste tu asistencia a '{pub['titulo']}'.", "success")
     return redirect(url_for("cliente_dashboard", tab="nef"))
+
+
+@app.route("/webhook/whatsapp", methods=["POST"])
+def webhook_whatsapp():
+    """Recibe los mensajes entrantes de WhatsApp que reenvía Twilio (sandbox o número real).
+    Solo para pruebas: registra el mensaje en consola y responde algo genérico. Twilio espera
+    una respuesta en TwiML (XML); si no quieres contestar nada, basta un <Response/> vacío.
+    Nota: esto no valida la firma X-Twilio-Signature — antes de usarlo en producción hay que
+    verificarla para confirmar que la petición viene realmente de Twilio."""
+    remitente = request.form.get("From", "")
+    cuerpo = request.form.get("Body", "")
+    print(f"[webhook_whatsapp] Mensaje de {remitente}: {cuerpo!r}")
+
+    respuesta_texto = "Gracias por tu mensaje. Este es el sandbox de pruebas de Rutas de Recolección."
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f"<Response><Message>{respuesta_texto}</Message></Response>"
+    )
+    return app.response_class(twiml, mimetype="text/xml")
 
 
 init_db()
