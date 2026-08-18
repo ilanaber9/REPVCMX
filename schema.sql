@@ -17,7 +17,8 @@ DROP TABLE IF EXISTS users;
 CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  email TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE,
+  telefono TEXT,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('admin','recolector','cliente','nef')),
   edad INTEGER,
@@ -38,6 +39,8 @@ CREATE TABLE users (
   es_admin_general INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
+
+CREATE UNIQUE INDEX idx_users_telefono ON users(telefono);
 
 CREATE TABLE nef_publicaciones (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

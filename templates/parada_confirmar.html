@@ -5,6 +5,20 @@
   {% if not valido %}
   <h1>Enlace no válido</h1>
   <p style="color:var(--muted);">Este enlace de confirmación ya no es válido o ya expiró.</p>
+  {% elif pendiente %}
+  <h1>Confirmar recolección</h1>
+  {% if respuesta == 'si' %}
+  <p style="color:var(--muted);">
+    Vas a confirmar que sí puedes recibir la recolección el {{ parada['fecha'] }} en {{ parada['direccion'] }}.
+  </p>
+  {% else %}
+  <p style="color:var(--muted);">
+    Vas a avisarnos que no vas a poder recibir la recolección el {{ parada['fecha'] }} en {{ parada['direccion'] }}. La quitaremos de la ruta de hoy y te la reprogramaremos para otro día.
+  </p>
+  {% endif %}
+  <form method="post">
+    <button type="submit" class="btn">Confirmar</button>
+  </form>
   {% elif respuesta == 'si' %}
   <h1>✅ ¡Gracias!</h1>
   <p style="color:var(--muted);">

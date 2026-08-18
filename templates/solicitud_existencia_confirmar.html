@@ -5,6 +5,20 @@
   {% if not valido %}
   <h1>Enlace no válido</h1>
   <p style="color:var(--muted);">Este enlace ya no es válido o ya expiró.</p>
+  {% elif pendiente %}
+  <h1>Confirmar</h1>
+  {% if respuesta == 'si' %}
+  <p style="color:var(--muted);">
+    Vas a confirmar que sigues necesitando {{ solicitud['cantidad_cajas'] or '' }} caja(s) de {{ solicitud['material'] }}.
+  </p>
+  {% else %}
+  <p style="color:var(--muted);">
+    Vas a cancelar tu solicitud de {{ solicitud['cantidad_cajas'] or '' }} caja(s) de {{ solicitud['material'] }}.
+  </p>
+  {% endif %}
+  <form method="post">
+    <button type="submit" class="btn">Confirmar</button>
+  </form>
   {% elif respuesta == 'si' %}
   <h1>✅ ¡Gracias!</h1>
   <p style="color:var(--muted);">

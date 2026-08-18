@@ -211,15 +211,18 @@
   <div class="card">
     <h1 style="margin:0;">Invitar nuevo paciente</h1>
     <p style="color:var(--muted); font-size:0.85rem;">
-      Le mandamos un correo de invitación para que cree su propia contraseña y complete su perfil
+      Le mandamos una invitación por WhatsApp para que cree su propia contraseña y complete su perfil
       médico y su dirección de recolección directamente en la app — así queda inscrito con su
       propia cuenta desde el inicio.
     </p>
     <form method="post" action="{{ url_for('admin_invitar_paciente') }}">
       <label>Nombre del paciente</label>
       <input type="text" name="nombre" required>
-      <label>Correo</label>
-      <input type="email" name="email" required>
+      <label>WhatsApp</label>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span style="padding:9px 10px; border:1px solid var(--border); border-radius:8px; color:var(--muted); background:#f5f5f5;">+52</span>
+        <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="10" pattern="[0-9 ]*" required style="flex:1;">
+      </div>
       <button type="submit">Enviar invitación</button>
     </form>
   </div>
@@ -457,11 +460,11 @@
     </div>
     <div id="tabla-pacientes" class="table-scroll">
     <table>
-      <tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Edad</th><th>Tipo</th><th>Marca</th><th>Frecuencia/semana</th><th>Causa</th><th>Dirección</th><th>Ruta</th><th>Modalidad</th><th>Última visita</th><th>Material recolectado</th><th>Estado</th><th>Bote</th><th></th></tr>
+      <tr><th>Nombre</th><th>WhatsApp (cuenta)</th><th>Teléfono (entrega)</th><th>Edad</th><th>Tipo</th><th>Marca</th><th>Frecuencia/semana</th><th>Causa</th><th>Dirección</th><th>Ruta</th><th>Modalidad</th><th>Última visita</th><th>Material recolectado</th><th>Estado</th><th>Bote</th><th></th></tr>
       {% for p in pacientes %}
       <tr>
         <td>{{ p['name'] }}{% if p['modalidad_actual'] == 'compra' %} 💲{% endif %}</td>
-        <td>{{ p['email'] }}</td>
+        <td>{{ ('+52 ' + p['telefono']) if p['telefono'] else '—' }}</td>
         <td>{{ p['telefono_actual'] or '—' }}</td>
         {% if p['perfil_completo'] %}
         <td>{{ p['edad'] }}</td>

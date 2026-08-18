@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Verifica tu cuenta{% endblock %}
+{% block content %}
+<div class="card auth-card" style="text-align:center;">
+  {% if not valido %}
+  <h1>Enlace no válido</h1>
+  <p style="color:var(--muted);">Este enlace de verificación ya no es válido o ya expiró. Inicia sesión y pide que te reenviemos uno nuevo.</p>
+  <a class="btn secondary" href="{{ url_for('login') }}" style="margin-top:16px; display:inline-block;">Ir a iniciar sesión</a>
+  {% else %}
+  <h1>Verifica tu cuenta</h1>
+  <p style="color:var(--muted);">Hola {{ nombre }}, confirma que quieres activar tu cuenta en RE-PVC.</p>
+  <form method="post">
+    <button type="submit" class="btn">Confirmar mi cuenta</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

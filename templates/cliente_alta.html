@@ -9,12 +9,6 @@
   <h1>Dar de alta tu dirección</h1>
   <p style="color:var(--muted); font-size:0.9rem;">Un último paso: dinos dónde te entregamos tu primer bote.</p>
   <form method="post" action="{{ url_for('cliente_alta') }}">
-    <label>Teléfono</label>
-    <div style="display:flex; gap:8px; align-items:center;">
-      <span style="padding:9px 10px; border:1px solid var(--border); border-radius:8px; color:var(--muted); background:#f5f5f5;">+52</span>
-      <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="10" pattern="[0-9 ]*" style="flex:1;">
-    </div>
-
     <label>Dirección</label>
     <input type="text" id="paciente-direccion" name="direccion" required>
     <label>Código postal</label>
@@ -51,7 +45,6 @@
     <h2 style="margin-top:0;">¿Todo está correcto?</h2>
     <p style="color:var(--muted); font-size:0.9rem;">Revisa que estos datos sean correctos antes de continuar:</p>
     <p style="line-height:1.8;">
-      <strong>Teléfono:</strong> <span id="confirmar-telefono"></span><br>
       <strong>Dirección:</strong> <span id="confirmar-direccion"></span><br>
       <strong>Código postal:</strong> <span id="confirmar-cp"></span>
     </p>
@@ -202,8 +195,6 @@ const bloqueConfirmacion = document.getElementById('confirmacion-datos');
 
 document.getElementById('btn-terminar-registro').addEventListener('click', () => {
   if (!formAlta.reportValidity()) return;
-  const telefono = document.querySelector('input[name="telefono"]').value.trim();
-  document.getElementById('confirmar-telefono').textContent = telefono ? ('+52 ' + telefono) : 'No indicado';
   document.getElementById('confirmar-direccion').textContent = document.getElementById('paciente-direccion').value.trim();
   document.getElementById('confirmar-cp').textContent = document.getElementById('paciente-cp').value.trim() || 'No indicado';
   formAlta.style.display = 'none';

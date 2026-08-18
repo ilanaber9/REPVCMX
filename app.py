@@ -491,11 +491,14 @@ def horario_estimado_parada(db, parada_id):
     return f"{llegada.strftime('%-I:%M %p')} – {salida_de_ahi.strftime('%-I:%M %p')}"
 
 
-def _notificar_paradas_programadas(parada_ids, host_url):
+def _notificar_paradas_programadas(parada_ids):
     """Manda a cada paciente un correo con la información de su recolección recién programada
     (fecha, horario estimado, recolector) y dos ligas para confirmar si podrá recibir la
     recolección ese día o no. Corre en un hilo aparte con su propia conexión a la base de
-    datos, así que no bloquea la respuesta de quien creó la ruta."""
+    datos, así que no bloquea la respuesta de quien creó la ruta.
+    Arma las ligas con url_absoluta() en vez de tomar el host de la petición que creó la ruta
+    (request.host_url) — ese host es el del navegador del admin/recolector, no le sirve de nada
+    al paciente que abre el enlace desde su propio teléfono."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     try:
@@ -510,9 +513,9 @@ def _notificar_paradas_programadas(parada_ids, host_url):
             if parada is None or not parada["cliente_id"]:
                 continue
             paciente = conn.execute(
-                "SELECT name, email FROM users WHERE id = ?", (parada["cliente_id"],)
+                "SELECT name, telefono FROM users WHERE id = ?", (parada["cliente_id"],)
             ).fetchone()
-            if not paciente or not paciente["email"]:
+            if not paciente or not paciente["telefono"]:
                 continue
 
             token = secrets.token_urlsafe(24)
@@ -520,9 +523,9 @@ def _notificar_paradas_programadas(parada_ids, host_url):
             conn.commit()
 
             horario = horario_estimado_parada(conn, parada_id)
-            base = host_url.rstrip("/")
-            link_si = f"{base}/parada/{token}/confirmar?respuesta=si"
-            link_no = f"{base}/parada/{token}/confirmar?respuesta=no"
+            with app.test_request_context():
+                link_si = url_absoluta("parada_confirmar", token=token, respuesta="si")
+                link_no = url_absoluta("parada_confirmar", token=token, respuesta="no")
 
             cuerpo = (
                 f"Hola {paciente['name']},\n\n"
@@ -535,7 +538,7 @@ def _notificar_paradas_programadas(parada_ids, host_url):
                 f"Sí puedo: {link_si}\n"
                 f"No puedo: {link_no}\n"
             )
-            enviar_email(paciente["email"], "Tu recolección ya está programada — RE-PVC", cuerpo)
+            enviar_whatsapp(telefono_whatsapp_e164(paciente["telefono"]), cuerpo)
     finally:
         conn.close()
 
@@ -560,9 +563,9 @@ def _notificar_siguiente_parada(ruta_id):
         if sol is None or not sol["cliente_id"]:
             return
         paciente = conn.execute(
-            "SELECT name, email FROM users WHERE id = ?", (sol["cliente_id"],)
+            "SELECT name, telefono FROM users WHERE id = ?", (sol["cliente_id"],)
         ).fetchone()
-        if not paciente or not paciente["email"]:
+        if not paciente or not paciente["telefono"]:
             return
 
         horario = horario_estimado_siguiente(conn, siguiente["id"])
@@ -573,18 +576,40 @@ def _notificar_siguiente_parada(ruta_id):
             f"Dirección registrada: {sol['direccion']}\n\n"
             "Ten tu material listo para cuando llegue."
         )
-        enviar_email(paciente["email"], "¡Eres el siguiente! — RE-PVC", cuerpo)
+        enviar_whatsapp(telefono_whatsapp_e164(paciente["telefono"]), cuerpo)
     finally:
         conn.close()
 
 
-def normalizar_telefono(raw):
-    """Toma solo los dígitos del número que escribió el paciente y le antepone +52.
-    Devuelve None si no escribió nada."""
+def url_absoluta(endpoint, **kwargs):
+    """Arma un enlace completo para mandar por WhatsApp. url_for(_external=True) usa el host con
+    el que se hizo la petición que disparó el envío (por ejemplo 127.0.0.1 si el admin está en su
+    propia laptop) — eso rompe el enlace para quien lo reciba en otro dispositivo. Si PUBLIC_BASE_URL
+    está configurada en .env (IP de red local para pruebas, o el dominio real en producción), se usa
+    esa en vez del host de la petición."""
+    base = os.environ.get("PUBLIC_BASE_URL")
+    if base:
+        return base.rstrip("/") + url_for(endpoint, **kwargs)
+    return url_for(endpoint, _external=True, **kwargs)
+
+
+def telefono_identidad(raw):
+    """Valida el teléfono que un cliente usa como identidad de cuenta (login, registro,
+    recuperación). Devuelve los 10 dígitos tal cual (sin +52) o None si no son exactamente 10."""
     digitos = re.sub(r"\D", "", raw or "")
-    if not digitos:
+    if len(digitos) != 10:
         return None
-    return f"+52 {digitos}"
+    return digitos
+
+
+def telefono_whatsapp_e164(telefono_10_digitos):
+    """Arma la dirección que espera la API de WhatsApp para un número mexicano de 10 dígitos.
+    WhatsApp usa un "1" extra después del 52 para México (no se marca así al llamar, pero así
+    quedó registrado el wa_id) — confirmado al probar contra el sandbox de Twilio."""
+    digitos = re.sub(r"\D", "", telefono_10_digitos or "")
+    if len(digitos) != 10:
+        return None
+    return f"+521{digitos}"
 
 
 def crear_notificacion_admin(db, cliente_id, mensaje):
@@ -935,7 +960,7 @@ def reequilibrar_rutas_zona(db, zona, nueva_solicitud_id=None):
 
     if parada_ids_nuevas:
         threading.Thread(
-            target=_notificar_paradas_programadas, args=(parada_ids_nuevas, request.host_url), daemon=True
+            target=_notificar_paradas_programadas, args=(parada_ids_nuevas,), daemon=True
         ).start()
 
 
@@ -982,19 +1007,19 @@ def promover_lista_espera(db):
         zona = db.execute("SELECT zona FROM solicitudes WHERE id = ?", (siguiente["id"],)).fetchone()["zona"]
 
     nombre = siguiente["nombre_contacto"]
-    correo_paciente = None
+    telefono_paciente = None
     if siguiente["cliente_id"]:
-        u = db.execute("SELECT name, email FROM users WHERE id = ?", (siguiente["cliente_id"],)).fetchone()
+        u = db.execute("SELECT name, telefono FROM users WHERE id = ?", (siguiente["cliente_id"],)).fetchone()
         if u:
             nombre = u["name"]
-            correo_paciente = u["email"]
+            telefono_paciente = u["telefono"]
     mensaje = f"'{nombre}' salió de la lista de espera y ya quedó activo"
     mensaje += f", asignado a {zona}." if zona else "."
     crear_notificacion_admin(db, siguiente["cliente_id"], mensaje)
 
-    if correo_paciente:
-        enviar_email(
-            correo_paciente, "Ya te integramos a una ruta — RE-PVC",
+    if telefono_paciente:
+        enviar_whatsapp(
+            telefono_whatsapp_e164(telefono_paciente),
             f"Hola {nombre},\n\n"
             "¡Buenas noticias! Ya se liberó un lugar y saliste de la lista de espera: "
             + (f"quedaste integrado a {zona}." if zona else "en breve te asignaremos una ruta.")
@@ -1111,16 +1136,25 @@ TIPO_LOGIN_LABELS = {"admin": "Administrador", "recolector": "Recolector", "clie
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email = request.form["email"].strip().lower()
         password = request.form["password"]
         tipo = request.form.get("tipo") or None
         db = get_db()
-        user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        if tipo == "cliente":
+            telefono = telefono_identidad(request.form.get("telefono", ""))
+            user = db.execute(
+                "SELECT * FROM users WHERE telefono = ? AND role = 'cliente'", (telefono,)
+            ).fetchone()
+            error_no_existe = "Ese número de WhatsApp no está registrado."
+        else:
+            email = request.form["email"].strip().lower()
+            user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            error_no_existe = "Este correo no está registrado."
         if user is None:
-            flash("Este correo no está registrado.", "error")
+            flash(error_no_existe, "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         if not check_password_hash(user["password_hash"], password):
-            flash("Correo o contraseña incorrectos.", "error")
+            error_password = "Número de WhatsApp o contraseña incorrectos." if tipo == "cliente" else "Correo o contraseña incorrectos."
+            flash(error_password, "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         if tipo and TIPO_LOGIN_ROLES.get(tipo) != user["role"]:
             flash(f"Esa cuenta no es de {TIPO_LOGIN_LABELS.get(tipo, tipo)}.", "error")
@@ -1141,9 +1175,16 @@ def logout():
 @app.route("/olvide-password", methods=["GET", "POST"])
 def olvide_password():
     if request.method == "POST":
-        email = request.form.get("email", "").strip().lower()
+        tipo = request.form.get("tipo") or None
         db = get_db()
-        user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        if tipo == "cliente":
+            telefono = telefono_identidad(request.form.get("telefono", ""))
+            user = db.execute(
+                "SELECT * FROM users WHERE telefono = ? AND role = 'cliente'", (telefono,)
+            ).fetchone()
+        else:
+            email = request.form.get("email", "").strip().lower()
+            user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         if user:
             token = secrets.token_urlsafe(32)
             expira = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
@@ -1152,18 +1193,26 @@ def olvide_password():
                 (token, expira, user["id"]),
             )
             db.commit()
-            link = url_for("restablecer_password", token=token, _external=True)
-            enviar_email(
-                email,
-                "Recuperar contraseña — RE-PVC",
+            link = url_absoluta("restablecer_password", token=token)
+            cuerpo = (
                 f"Hola {user['name']},\n\n"
                 "Recibimos una solicitud para restablecer tu contraseña en RE-PVC.\n"
                 f"Entra a este enlace para poner una nueva (válido por 1 hora):\n{link}\n\n"
-                "Si tú no pediste esto, ignora este correo.",
+                "Si tú no pediste esto, ignora este mensaje."
             )
-        flash("Si ese correo está registrado, te enviamos un enlace para restablecer tu contraseña.", "success")
-        return redirect(url_for("login"))
-    return render_template("olvide_password.html")
+            if tipo == "cliente":
+                enviar_whatsapp(telefono_whatsapp_e164(user["telefono"]), cuerpo)
+            else:
+                enviar_email(user["email"], "Recuperar contraseña — RE-PVC", cuerpo)
+        mensaje = (
+            "Si ese número de WhatsApp está registrado, te enviamos un enlace para restablecer tu contraseña."
+            if tipo == "cliente"
+            else "Si ese correo está registrado, te enviamos un enlace para restablecer tu contraseña."
+        )
+        flash(mensaje, "success")
+        return redirect(url_for("login", tipo=tipo))
+    tipo = request.args.get("tipo") or None
+    return render_template("olvide_password.html", tipo=tipo)
 
 
 @app.route("/restablecer-password/<token>", methods=["GET", "POST"])
@@ -1229,8 +1278,11 @@ def marcar_parada_ausente_por_rechazo(db, parada_id):
     return parada["ruta_id"], parada["lat"], parada["lon"], parada["solicitud_id"]
 
 
-@app.route("/parada/<token>/confirmar")
+@app.route("/parada/<token>/confirmar", methods=["GET", "POST"])
 def parada_confirmar(token):
+    """El GET solo muestra la página con el botón de confirmar, sin actualizar nada — ver el
+    comentario de verificar_correo() sobre por qué (el robot de vista previa de WhatsApp
+    precarga el link antes de que el paciente lo abra)."""
     respuesta = request.args.get("respuesta")
     if respuesta not in ("si", "no"):
         return render_template("parada_confirmar.html", valido=False), 400
@@ -1243,6 +1295,8 @@ def parada_confirmar(token):
     ).fetchone()
     if parada is None:
         return render_template("parada_confirmar.html", valido=False), 404
+    if request.method == "GET":
+        return render_template("parada_confirmar.html", valido=True, pendiente=True, respuesta=respuesta, parada=parada)
     db.execute("UPDATE paradas SET confirmado_paciente = ? WHERE id = ?", (respuesta, parada["id"]))
     if respuesta == "no":
         resultado = marcar_parada_ausente_por_rechazo(db, parada["id"])
@@ -1250,15 +1304,18 @@ def parada_confirmar(token):
         if resultado:
             ruta_id, lat, lon, solicitud_id = resultado
             intentar_llenar_hueco_ausente(
-                db, ruta_id, lat, lon, request.host_url, solicitud_id_ausente=solicitud_id
+                db, ruta_id, lat, lon, solicitud_id_ausente=solicitud_id
             )
     else:
         db.commit()
     return render_template("parada_confirmar.html", valido=True, respuesta=respuesta, parada=parada)
 
 
-@app.route("/solicitud/<token>/existencia")
+@app.route("/solicitud/<token>/existencia", methods=["GET", "POST"])
 def solicitud_confirmar_existencia(token):
+    """El GET solo muestra la página con el botón de confirmar, sin actualizar nada — ver el
+    comentario de verificar_correo() sobre por qué (el robot de vista previa de WhatsApp
+    precarga el link antes de que el paciente lo abra)."""
     respuesta = request.args.get("respuesta")
     if respuesta not in ("si", "cancelar"):
         return render_template("solicitud_existencia_confirmar.html", valido=False), 400
@@ -1269,6 +1326,10 @@ def solicitud_confirmar_existencia(token):
     if sol["confirmado_existencia"] or sol["estado"] == "cancelada":
         return render_template(
             "solicitud_existencia_confirmar.html", valido=True, respuesta="ya_resuelto", solicitud=sol
+        )
+    if request.method == "GET":
+        return render_template(
+            "solicitud_existencia_confirmar.html", valido=True, pendiente=True, respuesta=respuesta, solicitud=sol
         )
 
     if respuesta == "cancelar":
@@ -1327,7 +1388,7 @@ def cliente_confirmar_parada(user, parada_id):
         if resultado:
             ruta_id, lat, lon, solicitud_id = resultado
             intentar_llenar_hueco_ausente(
-                db, ruta_id, lat, lon, request.host_url, solicitud_id_ausente=solicitud_id
+                db, ruta_id, lat, lon, solicitud_id_ausente=solicitud_id
             )
     else:
         db.commit()
@@ -1364,50 +1425,63 @@ def paciente_verificar_zona():
 def registro():
     if request.method == "POST":
         name = request.form["name"].strip()
-        email = request.form["email"].strip().lower()
+        telefono = telefono_identidad(request.form.get("telefono", ""))
         password = request.form["password"]
+        if telefono is None:
+            flash("Escribe un número de WhatsApp válido de 10 dígitos.", "error")
+            return render_template("registro.html")
         db = get_db()
-        existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+        existing = db.execute("SELECT id FROM users WHERE telefono = ?", (telefono,)).fetchone()
         if existing:
-            flash("Ese correo ya está registrado.", "error")
+            flash("Ese número de WhatsApp ya está registrado.", "error")
             return render_template("registro.html")
         token = secrets.token_urlsafe(32)
         db.execute(
-            "INSERT INTO users (name, email, password_hash, role, email_verificado, verificacion_token) "
+            "INSERT INTO users (name, telefono, password_hash, role, email_verificado, verificacion_token) "
             "VALUES (?, ?, ?, 'cliente', 0, ?)",
-            (name, email, generate_password_hash(password, method="pbkdf2:sha256"), token),
+            (name, telefono, generate_password_hash(password, method="pbkdf2:sha256"), token),
         )
         db.commit()
-        link = url_for("verificar_correo", token=token, _external=True)
-        enviado = enviar_email(
-            email, "Verifica tu correo — RE-PVC",
-            f"Hola {name},\n\nGracias por registrarte en RE-PVC. Confirma tu correo entrando a este enlace:\n{link}\n\n"
-            "Si tú no creaste esta cuenta, ignora este correo.",
+        link = url_absoluta("verificar_correo", token=token)
+        enviado = enviar_whatsapp(
+            telefono_whatsapp_e164(telefono),
+            f"Hola {name},\n\nGracias por registrarte en RE-PVC. Confirma tu cuenta entrando a este enlace:\n{link}\n\n"
+            "Si tú no creaste esta cuenta, ignora este mensaje.",
         )
         if enviado:
-            flash("Cuenta creada. Revisa tu correo para verificarla antes de continuar.", "success")
+            flash("Cuenta creada. Revisa tu WhatsApp para verificarla antes de continuar.", "success")
         else:
             flash(
-                "Cuenta creada, pero no pudimos enviarte el correo de verificación en este momento. "
-                "Inicia sesión y usa la opción de reenviar el correo desde tu cuenta.",
+                "Cuenta creada, pero no pudimos enviarte el mensaje de verificación en este momento. "
+                "Inicia sesión y usa la opción de reenviar el mensaje desde tu cuenta.",
                 "error",
             )
-        return redirect(url_for("login"))
+        return redirect(url_for("login", tipo="cliente"))
     return render_template("registro.html")
 
 
-@app.route("/verificar-correo/<token>")
+@app.route("/verificar-correo/<token>", methods=["GET", "POST"])
 def verificar_correo(token):
+    """El GET solo muestra la página con el botón de confirmar, sin tocar la base de datos —
+    WhatsApp manda un robot (facebookexternalhit) a precargar el link para armar la vista previa
+    en cuanto se envía el mensaje, antes de que la persona lo abra. Si el GET ya consumiera el
+    token (como antes), el robot lo gastaba primero y el paciente se encontraba el enlace
+    'inválido' segundos después. Por eso la acción real solo pasa en el POST, que solo dispara un
+    clic humano en el botón, nunca el robot de vista previa."""
     db = get_db()
     user = db.execute("SELECT * FROM users WHERE verificacion_token = ?", (token,)).fetchone()
     if user is None:
+        if request.method == "GET":
+            return render_template("verificar_correo.html", valido=False)
         flash("Ese enlace de verificación ya no es válido.", "error")
         return redirect(url_for("login"))
+    if request.method == "GET":
+        return render_template("verificar_correo.html", valido=True, nombre=user["name"])
     db.execute(
         "UPDATE users SET email_verificado = 1, verificacion_token = NULL WHERE id = ?", (user["id"],)
     )
     db.commit()
-    flash("¡Correo verificado! Ya puedes continuar.", "success")
+    flash("¡Cuenta verificada! Ya puedes continuar.", "success")
     session.clear()
     session["user_id"] = user["id"]
     return redirect(url_for("home"))
@@ -1425,15 +1499,15 @@ def cliente_verificar_correo(user):
         db = get_db()
         db.execute("UPDATE users SET verificacion_token = ? WHERE id = ?", (token, user["id"]))
         db.commit()
-        link = url_for("verificar_correo", token=token, _external=True)
-        enviado = enviar_email(
-            user["email"], "Verifica tu correo — RE-PVC",
-            f"Hola {user['name']},\n\nConfirma tu correo entrando a este enlace:\n{link}",
+        link = url_absoluta("verificar_correo", token=token)
+        enviado = enviar_whatsapp(
+            telefono_whatsapp_e164(user["telefono"]),
+            f"Hola {user['name']},\n\nConfirma tu cuenta entrando a este enlace:\n{link}",
         )
         if enviado:
-            flash("Te reenviamos el correo de verificación.", "success")
+            flash("Te reenviamos el mensaje de verificación por WhatsApp.", "success")
         else:
-            flash("No pudimos enviar el correo en este momento. Intenta de nuevo en unos minutos.", "error")
+            flash("No pudimos enviar el mensaje en este momento. Intenta de nuevo en unos minutos.", "error")
     return render_template("cliente_verificar_correo.html")
 
 
@@ -1535,7 +1609,6 @@ def cliente_alta(user):
     if request.method == "POST":
         direccion = request.form["direccion"].strip()
         codigo_postal = request.form.get("codigo_postal", "").strip() or None
-        telefono = normalizar_telefono(request.form.get("telefono", ""))
         lat = request.form.get("lat", "").strip()
         lon = request.form.get("lon", "").strip()
         try:
@@ -1560,9 +1633,9 @@ def cliente_alta(user):
 
         estado_inicial = "lista_espera" if (en_espera or sin_cobertura) else "pendiente_entrega"
         cur = db.execute(
-            "INSERT INTO solicitudes (cliente_id, direccion, codigo_postal, telefono, material, lat, lon, zona, "
-            "estado, fuera_cobertura) VALUES (?, ?, ?, ?, 'PVC', ?, ?, ?, ?, ?)",
-            (user["id"], direccion, codigo_postal, telefono, lat, lon, zona, estado_inicial,
+            "INSERT INTO solicitudes (cliente_id, direccion, codigo_postal, material, lat, lon, zona, "
+            "estado, fuera_cobertura) VALUES (?, ?, ?, 'PVC', ?, ?, ?, ?, ?)",
+            (user["id"], direccion, codigo_postal, lat, lon, zona, estado_inicial,
              1 if sin_cobertura else 0),
         )
         db.execute("UPDATE users SET alta_completa = 1, terminos_aceptados = 1 WHERE id = ?", (user["id"],))
@@ -1586,8 +1659,8 @@ def cliente_alta(user):
         crear_notificacion_admin(db, user["id"], mensaje)
         db.commit()
         if en_espera:
-            enviar_email(
-                user["email"], "Quedaste en lista de espera — RE-PVC",
+            enviar_whatsapp(
+                telefono_whatsapp_e164(user["telefono"]),
                 f"Hola {user['name']},\n\n"
                 f"Por ahora llegamos al cupo máximo de {MAX_PACIENTES_ACTIVOS} pacientes activos, "
                 "así que tu registro quedó en la lista de espera.\n"
@@ -1600,8 +1673,8 @@ def cliente_alta(user):
                 "success",
             )
         elif sin_cobertura:
-            enviar_email(
-                user["email"], "Registro recibido — RE-PVC",
+            enviar_whatsapp(
+                telefono_whatsapp_e164(user["telefono"]),
                 f"Hola {user['name']},\n\n"
                 "Tu registro quedó completo. Por ahora no tenemos ruta en tu zona, así que tu recolección "
                 "queda pendiente — en cuanto tengamos cobertura ahí te avisaremos y te integraremos a una ruta.",
@@ -1761,8 +1834,8 @@ def cliente_nueva_solicitud(user):
                 f"'{user['name']}' quiere pasar a recoger {cajas_texto} de {material} en RE-PVC "
                 "— ya hay existencia, se le avisó que puede pasar.",
             )
-            enviar_email(
-                user["email"], "Ya tenemos existencia — RE-PVC",
+            enviar_whatsapp(
+                telefono_whatsapp_e164(user["telefono"]),
                 f"Hola {user['name']},\n\nYa tenemos existencia de {cajas_texto} de {material}. "
                 "Ya puedes pasar a recolectarlas a:\n"
                 "Filiberto Gómez 279, Tlaxcopan, Tlalnepantla de Baz, Estado de México, CP 54030",
@@ -1773,8 +1846,8 @@ def cliente_nueva_solicitud(user):
                 f"'{user['name']}' quiere pasar a recoger {cajas_texto} de {material} en RE-PVC "
                 "— por ahora no hay existencia suficiente.",
             )
-            enviar_email(
-                user["email"], "Recibimos tu solicitud — RE-PVC",
+            enviar_whatsapp(
+                telefono_whatsapp_e164(user["telefono"]),
                 f"Hola {user['name']},\n\nRecibimos tu solicitud de {cajas_texto} de {material}. "
                 "Por ahora no tenemos existencia suficiente — en cuanto la tengamos te escribiremos "
                 "para confirmar si sigues necesitándolas.",
@@ -1786,8 +1859,8 @@ def cliente_nueva_solicitud(user):
                 f"'{user['name']}' solicita recibir {cajas_texto} de {material} — hay existencia, "
                 "queda programada la entrega.",
             )
-            enviar_email(
-                user["email"], "Ya tenemos existencia — RE-PVC",
+            enviar_whatsapp(
+                telefono_whatsapp_e164(user["telefono"]),
                 f"Hola {user['name']},\n\nYa tenemos existencia de {cajas_texto} de {material}. "
                 "Tu entrega quedó programada, te avisaremos la fecha y el horario aproximado.",
             )
@@ -1797,8 +1870,8 @@ def cliente_nueva_solicitud(user):
                 f"'{user['name']}' solicita recibir {cajas_texto} de {material} — por ahora no hay "
                 "existencia suficiente.",
             )
-            enviar_email(
-                user["email"], "Recibimos tu solicitud — RE-PVC",
+            enviar_whatsapp(
+                telefono_whatsapp_e164(user["telefono"]),
                 f"Hola {user['name']},\n\nRecibimos tu solicitud de {cajas_texto} de {material}. "
                 "Por ahora no tenemos existencia suficiente — en cuanto la tengamos te escribiremos "
                 "para confirmar si sigues necesitándolas.",
@@ -1963,7 +2036,7 @@ def admin_dashboard(user):
         ).fetchone()
         paciente["ruta_actual"] = (ruta_sol["ruta_nombre"] or ruta_sol["zona"]) if ruta_sol else None
         paciente["direccion_actual"] = ruta_sol["direccion"] if ruta_sol else None
-        paciente["telefono_actual"] = ruta_sol["telefono"] if ruta_sol else None
+        paciente["telefono_actual"] = (ruta_sol["telefono"] if ruta_sol else None) or paciente["telefono"]
         paciente["modalidad_actual"] = ruta_sol["modalidad"] if ruta_sol else None
         paciente["solicitud_id_actual"] = ruta_sol["solicitud_id"] if ruta_sol else None
         paciente["bote_a_devolver"] = ruta_sol["bote_a_devolver"] if ruta_sol else False
@@ -2210,12 +2283,16 @@ def admin_invitar_paciente(user):
     dirección él mismo — así queda inscrito con su propia cuenta desde el inicio, en vez de una
     solicitud sin dueño (cliente_id NULL) que solo el admin puede ver/editar."""
     nombre = request.form["nombre"].strip()
-    email = request.form["email"].strip().lower()
+    telefono = telefono_identidad(request.form.get("telefono", ""))
+
+    if telefono is None:
+        flash("Escribe un número de WhatsApp válido de 10 dígitos. No se envió invitación.", "error")
+        return redirect(url_for("admin_dashboard", tab="paciente"))
 
     db = get_db()
-    existente = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+    existente = db.execute("SELECT id FROM users WHERE telefono = ?", (telefono,)).fetchone()
     if existente:
-        flash(f"Ese correo ya tiene una cuenta ({existente['id']}). No se envió invitación.", "error")
+        flash(f"Ese número de WhatsApp ya tiene una cuenta ({existente['id']}). No se envió invitación.", "error")
         return redirect(url_for("admin_dashboard", tab="paciente"))
 
     token = secrets.token_urlsafe(32)
@@ -2223,24 +2300,24 @@ def admin_invitar_paciente(user):
     # tiene que pasar por /invitacion/<token> para poner la suya y activar la cuenta.
     password_provisional = generate_password_hash(secrets.token_urlsafe(24), method="pbkdf2:sha256")
     db.execute(
-        "INSERT INTO users (name, email, password_hash, role, email_verificado, verificacion_token) "
+        "INSERT INTO users (name, telefono, password_hash, role, email_verificado, verificacion_token) "
         "VALUES (?, ?, ?, 'cliente', 0, ?)",
-        (nombre, email, password_provisional, token),
+        (nombre, telefono, password_provisional, token),
     )
     db.commit()
-    link = url_for("invitacion_paciente", token=token, _external=True)
-    enviado = enviar_email(
-        email, "Te invitamos a RE-PVC",
+    link = url_absoluta("invitacion_paciente", token=token)
+    enviado = enviar_whatsapp(
+        telefono_whatsapp_e164(telefono),
         f"Hola {nombre},\n\nTe dimos de alta en RE-PVC para que puedas programar tus recolecciones "
         f"de material PVC desde la app. Entra a este enlace para crear tu contraseña y activar tu "
         f"cuenta:\n{link}\n\nAhí mismo vas a poder completar tu perfil y tu dirección de recolección.\n\n"
-        "Si no esperabas este correo, ignóralo.",
+        "Si no esperabas este mensaje, ignóralo.",
     )
     if enviado:
-        flash(f"Se invitó a '{nombre}' — le enviamos un correo para que active su cuenta.", "success")
+        flash(f"Se invitó a '{nombre}' — le enviamos un WhatsApp para que active su cuenta.", "success")
     else:
         flash(
-            f"'{nombre}' quedó registrado, pero no pudimos enviarle el correo de invitación en este "
+            f"'{nombre}' quedó registrado, pero no pudimos enviarle la invitación por WhatsApp en este "
             "momento. Vuelve a intentar en unos minutos desde la lista de pacientes.",
             "error",
         )
@@ -2419,7 +2496,7 @@ def admin_nueva_ruta(user):
     db.commit()
     if parada_ids_nuevas:
         threading.Thread(
-            target=_notificar_paradas_programadas, args=(parada_ids_nuevas, request.host_url), daemon=True
+            target=_notificar_paradas_programadas, args=(parada_ids_nuevas,), daemon=True
         ).start()
     mensaje = f"Ruta '{nombre}' creada con {len(puntos)} parada(s)."
     if sobrantes_cajas:
@@ -2592,16 +2669,16 @@ def admin_activar_pendiente_ruta(user, solicitud_id):
     reequilibrar_rutas_zona(db, zona, solicitud_id)
     zona = db.execute("SELECT zona FROM solicitudes WHERE id = ?", (solicitud_id,)).fetchone()["zona"]
     nombre = sol["nombre_contacto"]
-    correo = None
+    telefono = None
     if sol["cliente_id"]:
-        u = db.execute("SELECT name, email FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
+        u = db.execute("SELECT name, telefono FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
         if u:
             nombre = u["name"]
-            correo = u["email"]
+            telefono = u["telefono"]
     db.commit()
-    if correo:
-        enviar_email(
-            correo, "¡Ya tenemos ruta en tu zona! — RE-PVC",
+    if telefono:
+        enviar_whatsapp(
+            telefono_whatsapp_e164(telefono),
             f"Hola {nombre},\n\n¡Buenas noticias! Ya tenemos ruta en tu zona"
             + (f" ({zona})" if zona else "") + " y quedaste integrado.\n"
             "Te avisaremos con la fecha y el horario aproximado en cuanto tu recolección quede programada.",
@@ -2683,13 +2760,13 @@ def avisar_solicitudes_pendientes_por_existencia(db, material):
         if necesita <= 0 or disponible < necesita:
             continue
         nombre = sol["nombre_contacto"]
-        correo = None
+        telefono = None
         if sol["cliente_id"]:
-            u = db.execute("SELECT name, email FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
+            u = db.execute("SELECT name, telefono FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
             if u:
                 nombre = u["name"]
-                correo = u["email"]
-        if not correo:
+                telefono = u["telefono"]
+        if not telefono:
             continue
         disponible -= necesita
         token = secrets.token_urlsafe(24)
@@ -2698,12 +2775,12 @@ def avisar_solicitudes_pendientes_por_existencia(db, material):
             (token, sol["id"]),
         )
         cajas_texto = f"{necesita} caja(s)" if necesita else "cajas"
-        link_si = url_for("solicitud_confirmar_existencia", token=token, respuesta="si", _external=True)
-        link_cancelar = url_for(
-            "solicitud_confirmar_existencia", token=token, respuesta="cancelar", _external=True
+        link_si = url_absoluta("solicitud_confirmar_existencia", token=token, respuesta="si")
+        link_cancelar = url_absoluta(
+            "solicitud_confirmar_existencia", token=token, respuesta="cancelar"
         )
-        enviar_email(
-            correo, "Ya hay existencia — RE-PVC",
+        enviar_whatsapp(
+            telefono_whatsapp_e164(telefono),
             f"Hola {nombre},\n\n"
             f"Ya tenemos existencia de {cajas_texto} de {material} que nos habías pedido.\n\n"
             "¿Sigues necesitándolas?\n\n"
@@ -3015,7 +3092,7 @@ def admin_rutas_masivas(user):
         db.commit()
         if parada_ids_nuevas:
             threading.Thread(
-                target=_notificar_paradas_programadas, args=(parada_ids_nuevas, request.host_url), daemon=True
+                target=_notificar_paradas_programadas, args=(parada_ids_nuevas,), daemon=True
             ).start()
         mensaje = f"{rutas_creadas} ruta(s) creada(s) con {paradas_creadas} parada(s) en total."
         if zonas_omitidas:
@@ -3505,7 +3582,8 @@ def recolector_ver_ruta(user, ruta_id):
         return redirect(url_for("recolector_dashboard"))
     paradas = db.execute(
         "SELECT p.*, s.direccion, s.material, s.modalidad, s.notas AS notas_solicitud, "
-        "s.cantidad_cajas, s.lat, s.lon, s.telefono, s.tipo_redistribucion, s.bote_a_devolver, "
+        "s.cantidad_cajas, s.lat, s.lon, COALESCE(s.telefono, u.telefono) AS telefono, "
+        "s.tipo_redistribucion, s.bote_a_devolver, "
         "COALESCE(u.name, s.nombre_contacto) AS cliente_nombre, "
         "s2.material AS material_extra, s2.cantidad_cajas AS cantidad_cajas_extra, "
         "s2.tipo_redistribucion AS tipo_redistribucion_extra "
@@ -3640,9 +3718,9 @@ def recolector_suspender_ruta(user, ruta_id):
             db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo, p["solicitud_id"]))
             db.execute("UPDATE paradas SET estado = 'incidencia', notas = ? WHERE id = ?", (nota, p["id"]))
             if p["cliente_id"]:
-                u = db.execute("SELECT name, email FROM users WHERE id = ?", (p["cliente_id"],)).fetchone()
-                if u:
-                    afectados[u["email"]] = u["name"]
+                u = db.execute("SELECT name, telefono FROM users WHERE id = ?", (p["cliente_id"],)).fetchone()
+                if u and u["telefono"]:
+                    afectados[u["telefono"]] = u["name"]
         if p["solicitud_extra_id"] and p["estado_extra"] == "pendiente":
             estado_previo_extra = "pendiente_entrega" if p["tipo_extra"] == "entrega" else "pendiente"
             db.execute(
@@ -3650,9 +3728,9 @@ def recolector_suspender_ruta(user, ruta_id):
             )
             db.execute("UPDATE paradas SET estado_extra = 'incidencia' WHERE id = ?", (p["id"],))
             if p["cliente_id_extra"]:
-                u2 = db.execute("SELECT name, email FROM users WHERE id = ?", (p["cliente_id_extra"],)).fetchone()
-                if u2:
-                    afectados[u2["email"]] = u2["name"]
+                u2 = db.execute("SELECT name, telefono FROM users WHERE id = ?", (p["cliente_id_extra"],)).fetchone()
+                if u2 and u2["telefono"]:
+                    afectados[u2["telefono"]] = u2["name"]
 
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db.execute("UPDATE rutas SET hora_fin_real = ?, estado = 'completada' WHERE id = ?", (ahora, ruta_id))
@@ -3663,9 +3741,9 @@ def recolector_suspender_ruta(user, ruta_id):
     )
     db.commit()
 
-    for email, nombre in afectados.items():
-        enviar_email(
-            email, "Suspendimos la ruta de hoy — RE-PVC",
+    for telefono, nombre in afectados.items():
+        enviar_whatsapp(
+            telefono_whatsapp_e164(telefono),
             f"Hola {nombre},\n\n"
             "Lamentamos informarte que la ruta de recolección de hoy tuvo que suspenderse por una "
             "eventualidad. Te ofrecemos una disculpa por las molestias.\n\n"
@@ -3714,7 +3792,7 @@ def _resolver_resultado_parte(db, solicitud_id, tipo, tipo_redistribucion, mater
 
 
 def intentar_llenar_hueco_ausente(
-    db, ruta_id, lat_ausente, lon_ausente, host_url, excluir_parada_id=None, solicitud_id_ausente=None,
+    db, ruta_id, lat_ausente, lon_ausente, excluir_parada_id=None, solicitud_id_ausente=None,
 ):
     """Cuando una parada queda 'ausente' —el recolector no encontró a nadie, o el paciente avisó
     de antemano en la plataforma que no va a poder recibir la recolección (en cuyo caso esa
@@ -3823,7 +3901,7 @@ def intentar_llenar_hueco_ausente(
     )
     db.commit()
     threading.Thread(
-        target=_notificar_paradas_programadas, args=([cur.lastrowid], host_url), daemon=True
+        target=_notificar_paradas_programadas, args=([cur.lastrowid],), daemon=True
     ).start()
     return candidato["direccion"]
 
@@ -3926,7 +4004,7 @@ def recolector_actualizar_parada(user, parada_id):
             "SELECT lat, lon FROM solicitudes WHERE id = ?", (parada["solicitud_id"],)
         ).fetchone()
         direccion_agregada = intentar_llenar_hueco_ausente(
-            db, parada["ruta_id"], sol_ausente["lat"], sol_ausente["lon"], request.host_url,
+            db, parada["ruta_id"], sol_ausente["lat"], sol_ausente["lon"],
             excluir_parada_id=parada_id,
         )
         if direccion_agregada:
@@ -3995,7 +4073,7 @@ def _enviar_invitaciones_nef(publicacion_id):
         if pub is None:
             return
         pacientes = conn.execute(
-            "SELECT name, email FROM users WHERE role = 'cliente' AND recibir_info_nef = 1"
+            "SELECT name, telefono FROM users WHERE role = 'cliente' AND recibir_info_nef = 1"
         ).fetchall()
     finally:
         conn.close()
@@ -4004,7 +4082,6 @@ def _enviar_invitaciones_nef(publicacion_id):
     if pub["hora_evento"]:
         detalles += f" a las {pub['hora_evento']}"
     if pub["tipo"] == "evento":
-        asunto = f"Invitación: {pub['titulo']} — NEF"
         if pub["lugar_evento"]:
             detalles += f"\nLugar: {pub['lugar_evento']}"
         if pub["lat"] is not None and pub["lon"] is not None:
@@ -4012,17 +4089,18 @@ def _enviar_invitaciones_nef(publicacion_id):
                 f"\nUbicación: https://www.google.com/maps/dir/?api=1&destination={pub['lat']},{pub['lon']}"
             )
     else:
-        asunto = f"Invitación a webinar: {pub['titulo']} — NEF"
         if pub["link_webinar"]:
             detalles += f"\nLiga para ingresar: {pub['link_webinar']}"
 
     for p in pacientes:
+        if not p["telefono"]:
+            continue
         cuerpo = f"Hola {p['name']},\n\nNEF te invita a: {pub['titulo']}\n\n{detalles}\n\n"
         if pub["contenido"]:
             cuerpo += f"{pub['contenido']}\n\n"
         if pub["tipo"] == "evento":
             cuerpo += "Puedes confirmar tu asistencia desde tu sesión en RE-PVC, en la pestaña NEF."
-        enviar_email(p["email"], asunto, cuerpo)
+        enviar_whatsapp(telefono_whatsapp_e164(p["telefono"]), cuerpo)
 
 
 @app.route("/nef")

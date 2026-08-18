@@ -6,14 +6,17 @@
   <form method="post">
     <label>Nombre</label>
     <input type="text" name="name" required autofocus>
-    <label>Correo</label>
-    <input type="email" name="email" required>
+    <label>WhatsApp</label>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <span style="padding:9px 10px; border:1px solid var(--border); border-radius:8px; color:var(--muted); background:#f5f5f5;">+52</span>
+      <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="10" pattern="[0-9 ]*" required style="flex:1;">
+    </div>
     <label>Contraseña</label>
     <input type="password" name="password" required minlength="4">
     <button type="submit">Crear cuenta</button>
   </form>
   <p style="margin-top:16px; font-size:0.9rem; color:var(--muted);">
-    <a href="{{ url_for('login') }}">Ya tengo cuenta, iniciar sesión</a>
+    <a href="{{ url_for('login', tipo='cliente') }}">Ya tengo cuenta, iniciar sesión</a>
   </p>
 </div>
 {% endblock %}

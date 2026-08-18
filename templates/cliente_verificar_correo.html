@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Verifica tu correo{% endblock %}
+{% block title %}Verifica tu cuenta{% endblock %}
 {% block content %}
 <div class="card auth-card" style="text-align:center;">
-  <h1>Verifica tu correo</h1>
+  <h1>Verifica tu cuenta</h1>
   <p style="color:var(--muted); font-size:0.9rem;">
-    Te mandamos un enlace de verificación a <strong>{{ current_user['email'] }}</strong>. Ábrelo desde tu correo
+    Te mandamos un enlace de verificación por WhatsApp al <strong>+52 {{ current_user['telefono'] }}</strong>. Ábrelo desde WhatsApp
     para continuar con tu registro.
   </p>
   <form method="post">
-    <button type="submit" class="secondary">Reenviar correo de verificación</button>
+    <button type="submit" class="secondary">Reenviar mensaje de verificación</button>
   </form>
   <p style="margin-top:16px; font-size:0.85rem;">
     <a href="{{ url_for('logout') }}">Salir</a>
