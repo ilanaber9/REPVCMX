@@ -22,7 +22,6 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "database.db")
 SCHEMA_PATH = os.path.join(BASE_DIR, "schema.sql")
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 
@@ -33,6 +32,10 @@ if os.path.exists(ENV_PATH):
             if linea and not linea.startswith("#") and "=" in linea:
                 clave, valor = linea.split("=", 1)
                 os.environ.setdefault(clave.strip(), valor.strip())
+
+# En Render, DATABASE_PATH apunta al disco persistente (/var/data/database.db) para que la base
+# sobreviva cada deploy — sin esta variable (como en desarrollo local) se queda junto al código.
+DB_PATH = os.environ.get("DATABASE_PATH", os.path.join(BASE_DIR, "database.db"))
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-cambiar-en-produccion")
