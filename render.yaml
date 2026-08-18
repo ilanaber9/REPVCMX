@@ -10,7 +10,7 @@ services:
         generateValue: true
       - key: SMTP_EMAIL
         sync: false
-      - key: BREVO_API_KEY
+      - key: SMTP_APP_PASSWORD
         sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
