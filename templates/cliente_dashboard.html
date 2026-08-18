@@ -17,6 +17,7 @@
   <div class="card">
     <h1 style="margin:0;">Mis solicitudes</h1>
     {% if solicitudes %}
+    <div class="table-scroll">
     <table>
       <tr><th>Fecha</th><th>Dirección</th><th>Tipo de caja</th><th>Cajas</th><th>Estado</th><th>Recolección programada</th><th>¿Puedes recibirla?</th></tr>
       {% for s in solicitudes %}
@@ -86,6 +87,7 @@
       </tr>
       {% endfor %}
     </table>
+    </div>
     {% else %}
     <p class="empty">Aún no tienes solicitudes.</p>
     {% endif %}
