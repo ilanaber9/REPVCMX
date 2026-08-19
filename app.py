@@ -532,18 +532,26 @@ def _notificar_paradas_programadas(parada_ids):
                 link_si = url_absoluta("parada_confirmar", token=token, respuesta="si")
                 link_no = url_absoluta("parada_confirmar", token=token, respuesta="no")
 
+            fecha_horario = parada["fecha"] + (f", entre {horario}" if horario else "")
             cuerpo = (
                 f"Hola {paciente['name']},\n\n"
-                f"Ya programamos tu recolección para el {parada['fecha']}"
-                + (f", entre {horario}" if horario else "")
-                + ".\n"
+                f"Ya programamos tu recolección para el {fecha_horario}.\n"
                 f"Recolector: {parada['recolector_nombre'] or 'por asignar'}\n"
                 f"Dirección: {parada['direccion']}\n\n"
                 "¿Vas a poder recibir la recolección ese día?\n\n"
                 f"Sí puedo: {link_si}\n"
                 f"No puedo: {link_no}\n"
             )
-            enviar_whatsapp(telefono_whatsapp_e164(paciente["telefono"]), cuerpo)
+            enviar_whatsapp_primer_contacto(
+                telefono_whatsapp_e164(paciente["telefono"]),
+                "TWILIO_TEMPLATE_RUTA_PROGRAMADA_SID",
+                {
+                    "1": paciente["name"], "2": fecha_horario,
+                    "3": parada["recolector_nombre"] or "por asignar", "4": parada["direccion"],
+                    "5": link_si, "6": link_no,
+                },
+                cuerpo,
+            )
     finally:
         conn.close()
 
@@ -574,14 +582,19 @@ def _notificar_siguiente_parada(ruta_id):
             return
 
         horario = horario_estimado_siguiente(conn, siguiente["id"])
+        horario_texto = f"entre {horario}" if horario else "en cualquier momento de hoy"
         cuerpo = (
             f"Hola {paciente['name']},\n\n"
-            "Prepárate, el recolector se encuentra en camino a tu domicilio"
-            + (f", entre {horario}" if horario else "") + ".\n\n"
+            f"Prepárate, el recolector se encuentra en camino a tu domicilio, {horario_texto}.\n\n"
             f"Dirección registrada: {sol['direccion']}\n\n"
             "Ten tu material listo para cuando llegue."
         )
-        enviar_whatsapp(telefono_whatsapp_e164(paciente["telefono"]), cuerpo)
+        enviar_whatsapp_primer_contacto(
+            telefono_whatsapp_e164(paciente["telefono"]),
+            "TWILIO_TEMPLATE_RECOLECTOR_EN_CAMINO_SID",
+            {"1": paciente["name"], "2": horario_texto, "3": sol["direccion"]},
+            cuerpo,
+        )
     finally:
         conn.close()
 
@@ -1106,12 +1119,14 @@ def promover_lista_espera(db):
     crear_notificacion_admin(db, siguiente["cliente_id"], mensaje)
 
     if telefono_paciente:
-        enviar_whatsapp(
+        texto_zona = f"quedaste integrado a {zona}." if zona else "en breve te asignaremos una ruta."
+        enviar_whatsapp_primer_contacto(
             telefono_whatsapp_e164(telefono_paciente),
+            "TWILIO_TEMPLATE_SALIO_ESPERA_SID",
+            {"1": nombre, "2": texto_zona},
             f"Hola {nombre},\n\n"
-            "¡Buenas noticias! Ya se liberó un lugar y saliste de la lista de espera: "
-            + (f"quedaste integrado a {zona}." if zona else "en breve te asignaremos una ruta.")
-            + "\nTe avisaremos con la fecha y el horario aproximado en cuanto tu recolección quede programada.",
+            f"¡Buenas noticias! Ya se liberó un lugar y saliste de la lista de espera: {texto_zona}\n"
+            "Te avisaremos con la fecha y el horario aproximado en cuanto tu recolección quede programada.",
         )
 
 
@@ -1756,8 +1771,10 @@ def cliente_alta(user):
         crear_notificacion_admin(db, user["id"], mensaje)
         db.commit()
         if en_espera:
-            enviar_whatsapp(
+            enviar_whatsapp_primer_contacto(
                 telefono_whatsapp_e164(user["telefono"]),
+                "TWILIO_TEMPLATE_LISTA_ESPERA_SID",
+                {"1": user["name"], "2": str(MAX_PACIENTES_ACTIVOS)},
                 f"Hola {user['name']},\n\n"
                 f"Por ahora llegamos al cupo máximo de {MAX_PACIENTES_ACTIVOS} pacientes activos, "
                 "así que tu registro quedó en la lista de espera.\n"
@@ -1770,8 +1787,10 @@ def cliente_alta(user):
                 "success",
             )
         elif sin_cobertura:
-            enviar_whatsapp(
+            enviar_whatsapp_primer_contacto(
                 telefono_whatsapp_e164(user["telefono"]),
+                "TWILIO_TEMPLATE_SIN_COBERTURA_SID",
+                {"1": user["name"]},
                 f"Hola {user['name']},\n\n"
                 "Tu registro quedó completo. Por ahora no tenemos ruta en tu zona, así que tu recolección "
                 "queda pendiente — en cuanto tengamos cobertura ahí te avisaremos y te integraremos a una ruta.",
@@ -1931,11 +1950,13 @@ def cliente_nueva_solicitud(user):
                 f"'{user['name']}' quiere pasar a recoger {cajas_texto} de {material} en RE-PVC "
                 "— ya hay existencia, se le avisó que puede pasar.",
             )
-            enviar_whatsapp(
+            direccion_repvc = "Filiberto Gómez 279, Tlaxcopan, Tlalnepantla de Baz, Estado de México, CP 54030"
+            enviar_whatsapp_primer_contacto(
                 telefono_whatsapp_e164(user["telefono"]),
+                "TWILIO_TEMPLATE_EXISTENCIA_RECOGER_SID",
+                {"1": user["name"], "2": cajas_texto, "3": material, "4": direccion_repvc},
                 f"Hola {user['name']},\n\nYa tenemos existencia de {cajas_texto} de {material}. "
-                "Ya puedes pasar a recolectarlas a:\n"
-                "Filiberto Gómez 279, Tlaxcopan, Tlalnepantla de Baz, Estado de México, CP 54030",
+                f"Ya puedes pasar a recolectarlas a:\n{direccion_repvc}",
             )
         else:
             crear_notificacion_admin(
@@ -1943,8 +1964,10 @@ def cliente_nueva_solicitud(user):
                 f"'{user['name']}' quiere pasar a recoger {cajas_texto} de {material} en RE-PVC "
                 "— por ahora no hay existencia suficiente.",
             )
-            enviar_whatsapp(
+            enviar_whatsapp_primer_contacto(
                 telefono_whatsapp_e164(user["telefono"]),
+                "TWILIO_TEMPLATE_SIN_EXISTENCIA_SID",
+                {"1": user["name"], "2": cajas_texto, "3": material},
                 f"Hola {user['name']},\n\nRecibimos tu solicitud de {cajas_texto} de {material}. "
                 "Por ahora no tenemos existencia suficiente — en cuanto la tengamos te escribiremos "
                 "para confirmar si sigues necesitándolas.",
@@ -1956,8 +1979,10 @@ def cliente_nueva_solicitud(user):
                 f"'{user['name']}' solicita recibir {cajas_texto} de {material} — hay existencia, "
                 "queda programada la entrega.",
             )
-            enviar_whatsapp(
+            enviar_whatsapp_primer_contacto(
                 telefono_whatsapp_e164(user["telefono"]),
+                "TWILIO_TEMPLATE_ENTREGA_PROGRAMADA_SID",
+                {"1": user["name"], "2": cajas_texto, "3": material},
                 f"Hola {user['name']},\n\nYa tenemos existencia de {cajas_texto} de {material}. "
                 "Tu entrega quedó programada, te avisaremos la fecha y el horario aproximado.",
             )
@@ -1967,8 +1992,10 @@ def cliente_nueva_solicitud(user):
                 f"'{user['name']}' solicita recibir {cajas_texto} de {material} — por ahora no hay "
                 "existencia suficiente.",
             )
-            enviar_whatsapp(
+            enviar_whatsapp_primer_contacto(
                 telefono_whatsapp_e164(user["telefono"]),
+                "TWILIO_TEMPLATE_SIN_EXISTENCIA_SID",
+                {"1": user["name"], "2": cajas_texto, "3": material},
                 f"Hola {user['name']},\n\nRecibimos tu solicitud de {cajas_texto} de {material}. "
                 "Por ahora no tenemos existencia suficiente — en cuanto la tengamos te escribiremos "
                 "para confirmar si sigues necesitándolas.",
@@ -2431,8 +2458,10 @@ def admin_invitar_paciente(user):
     )
     db.commit()
     link = url_absoluta("invitacion_paciente", token=token)
-    enviado = enviar_whatsapp(
+    enviado = enviar_whatsapp_primer_contacto(
         telefono_whatsapp_e164(telefono),
+        "TWILIO_TEMPLATE_INVITACION_SID",
+        {"1": nombre, "2": link},
         f"Hola {nombre},\n\nTe dimos de alta en RE-PVC para que puedas programar tus recolecciones "
         f"de material PVC desde la app. Entra a este enlace para crear tu contraseña y activar tu "
         f"cuenta:\n{link}\n\nAhí mismo vas a poder completar tu perfil y tu dirección de recolección.\n\n"
@@ -2802,10 +2831,12 @@ def admin_activar_pendiente_ruta(user, solicitud_id):
             telefono = u["telefono"]
     db.commit()
     if telefono:
-        enviar_whatsapp(
+        zona_texto = f" ({zona})" if zona else ""
+        enviar_whatsapp_primer_contacto(
             telefono_whatsapp_e164(telefono),
-            f"Hola {nombre},\n\n¡Buenas noticias! Ya tenemos ruta en tu zona"
-            + (f" ({zona})" if zona else "") + " y quedaste integrado.\n"
+            "TWILIO_TEMPLATE_ACTIVAR_RUTA_SID",
+            {"1": nombre, "2": zona_texto or "tu zona"},
+            f"Hola {nombre},\n\n¡Buenas noticias! Ya tenemos ruta en tu zona{zona_texto} y quedaste integrado.\n"
             "Te avisaremos con la fecha y el horario aproximado en cuanto tu recolección quede programada.",
         )
     flash(f"'{nombre}' se activó — asignado a {zona}.", "success")
@@ -2904,8 +2935,10 @@ def avisar_solicitudes_pendientes_por_existencia(db, material):
         link_cancelar = url_absoluta(
             "solicitud_confirmar_existencia", token=token, respuesta="cancelar"
         )
-        enviar_whatsapp(
+        enviar_whatsapp_primer_contacto(
             telefono_whatsapp_e164(telefono),
+            "TWILIO_TEMPLATE_EXISTENCIA_DISPONIBLE_SID",
+            {"1": nombre, "2": cajas_texto, "3": material, "4": link_si, "5": link_cancelar},
             f"Hola {nombre},\n\n"
             f"Ya tenemos existencia de {cajas_texto} de {material} que nos habías pedido.\n\n"
             "¿Sigues necesitándolas?\n\n"
@@ -3867,8 +3900,10 @@ def recolector_suspender_ruta(user, ruta_id):
     db.commit()
 
     for telefono, nombre in afectados.items():
-        enviar_whatsapp(
+        enviar_whatsapp_primer_contacto(
             telefono_whatsapp_e164(telefono),
+            "TWILIO_TEMPLATE_RUTA_SUSPENDIDA_SID",
+            {"1": nombre},
             f"Hola {nombre},\n\n"
             "Lamentamos informarte que la ruta de recolección de hoy tuvo que suspenderse por una "
             "eventualidad. Te ofrecemos una disculpa por las molestias.\n\n"
@@ -4225,7 +4260,15 @@ def _enviar_invitaciones_nef(publicacion_id):
             cuerpo += f"{pub['contenido']}\n\n"
         if pub["tipo"] == "evento":
             cuerpo += "Puedes confirmar tu asistencia desde tu sesión en RE-PVC, en la pestaña NEF."
-        enviar_whatsapp(telefono_whatsapp_e164(p["telefono"]), cuerpo)
+        # El contenido de una publicación es texto libre (fecha, lugar, descripción, ligas) y no
+        # cabe en una plantilla de variables fijas — la plantilla solo manda el aviso corto con el
+        # título, y el detalle completo se ve dentro de la app en cuanto el paciente entra.
+        enviar_whatsapp_primer_contacto(
+            telefono_whatsapp_e164(p["telefono"]),
+            "TWILIO_TEMPLATE_NEF_PUBLICACION_SID",
+            {"1": p["name"], "2": pub["titulo"]},
+            cuerpo,
+        )
 
 
 @app.route("/nef")
