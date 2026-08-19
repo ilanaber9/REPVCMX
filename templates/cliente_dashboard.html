@@ -19,11 +19,9 @@
     {% if solicitudes %}
     <div class="table-scroll">
     <table>
-      <tr><th>Fecha</th><th>Dirección</th><th>Tipo de caja</th><th>Cajas</th><th>Estado</th><th>Recolección programada</th><th>¿Puedes recibirla?</th></tr>
+      <tr><th>Tipo de caja</th><th>Cajas</th><th>Estado</th><th>Recolección programada</th><th>¿Puedes recibirla?</th></tr>
       {% for s in solicitudes %}
       <tr>
-        <td>{{ s['created_at'] }}</td>
-        <td>{{ s['direccion'] }}</td>
         <td>
           {% if s['tipo_redistribucion'] %}
             {{ s['material'] }}<br>
