@@ -1,4 +1,6 @@
 import base64
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -596,6 +598,18 @@ def url_absoluta(endpoint, **kwargs):
     return url_for(endpoint, _external=True, **kwargs)
 
 
+def _url_publica_actual():
+    """La URL exacta que Twilio usó para llamar a este webhook, para validar su firma. Detrás de
+    un proxy (como en Render) request.url puede reportar "http://" aunque Twilio realmente haya
+    llamado por "https://" —eso rompería la validación de la firma—, así que si PUBLIC_BASE_URL
+    está configurada se arma la URL a partir de ella en vez de confiar en el host/esquema que ve
+    Flask."""
+    base = os.environ.get("PUBLIC_BASE_URL")
+    if base:
+        return base.rstrip("/") + request.path
+    return request.url
+
+
 def telefono_identidad(raw):
     """Valida el teléfono que un cliente usa como identidad de cuenta (login, registro,
     recuperación). Devuelve los 10 dígitos tal cual (sin +52) o None si no son exactamente 10."""
@@ -688,6 +702,77 @@ def enviar_whatsapp(destinatario, cuerpo):
     except Exception as e:
         print(f"[enviar_whatsapp] Falló el envío a {destinatario}: {e}")
         return False
+
+
+def enviar_whatsapp_template(destinatario, content_sid, content_variables=None):
+    """Envía un WhatsApp usando una plantilla (Content Template) ya aprobada por Meta, en vez de
+    texto libre. Fuera del sandbox, WhatsApp solo deja mandar texto libre si la conversación ya
+    la abrió el usuario en las últimas 24h — para escribirle primero a alguien (como al paciente
+    que se acaba de registrar) hay que usar una plantilla aprobada. `content_sid` es el ID que
+    Twilio le da a la plantilla (empieza con "HX...") una vez aprobada; `content_variables` es un
+    diccionario con las variables numeradas de la plantilla, p. ej. {"1": nombre_paciente}."""
+    account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+    numero_from = os.environ.get("TWILIO_WHATSAPP_FROM")
+    if not account_sid or not auth_token or not numero_from:
+        print("[enviar_whatsapp_template] TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_WHATSAPP_FROM no están configurados — no se envió el mensaje.")
+        return False
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+    campos = {
+        "From": f"whatsapp:{numero_from}" if not numero_from.startswith("whatsapp:") else numero_from,
+        "To": f"whatsapp:{destinatario}" if not destinatario.startswith("whatsapp:") else destinatario,
+        "ContentSid": content_sid,
+    }
+    if content_variables:
+        campos["ContentVariables"] = json.dumps(content_variables)
+    data = urlencode(campos).encode("utf-8")
+    credenciales = base64.b64encode(f"{account_sid}:{auth_token}".encode("utf-8")).decode("ascii")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Authorization", f"Basic {credenciales}")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+        return True
+    except urllib.error.HTTPError as e:
+        detalle = e.read().decode("utf-8", errors="replace")
+        print(f"[enviar_whatsapp_template] Falló el envío a {destinatario}: {e.code} {detalle}")
+        return False
+    except Exception as e:
+        print(f"[enviar_whatsapp_template] Falló el envío a {destinatario}: {e}")
+        return False
+
+
+def enviar_whatsapp_primer_contacto(destinatario, content_sid_env, content_variables, cuerpo_libre):
+    """Manda el primer mensaje de una conversación de WhatsApp (uno que el negocio inicia, sin que
+    el paciente haya escrito antes): si ya hay una plantilla aprobada configurada en .env
+    (content_sid_env, p. ej. "TWILIO_TEMPLATE_VERIFICACION_SID"), la usa —obligatorio fuera del
+    sandbox para escribirle primero a alguien—; si no está configurada, cae al texto libre de
+    siempre, que es lo único que hace falta mientras se sigue probando en el sandbox (ahí no hay
+    restricción de plantillas). Así el código no necesita tocarse de nuevo: en cuanto se registre
+    la plantilla en Twilio y se agregue su SID a las variables de entorno, el envío cambia solo."""
+    content_sid = os.environ.get(content_sid_env)
+    if content_sid:
+        return enviar_whatsapp_template(destinatario, content_sid, content_variables)
+    return enviar_whatsapp(destinatario, cuerpo_libre)
+
+
+def validar_firma_twilio(url, parametros_post, firma_recibida):
+    """Confirma que una petición al webhook de WhatsApp realmente viene de Twilio y no de
+    cualquiera que le mande un POST falso a esta URL pública. Sigue el algoritmo de Twilio:
+    HMAC-SHA1 de la URL completa más cada par clave+valor del POST (ordenados alfabéticamente por
+    clave, concatenados sin separador), usando el auth token como llave, en base64 — y lo compara
+    contra el header X-Twilio-Signature con una comparación de tiempo constante."""
+    auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+    if not auth_token or not firma_recibida:
+        return False
+    base = url
+    for clave in sorted(parametros_post.keys()):
+        base += clave + parametros_post[clave]
+    firma_calculada = base64.b64encode(
+        hmac.new(auth_token.encode("utf-8"), base.encode("utf-8"), hashlib.sha1).digest()
+    ).decode("ascii")
+    return hmac.compare_digest(firma_calculada, firma_recibida)
 
 
 def geocodificar_direccion(direccion, limite=5, codigo_postal=None):
@@ -1204,7 +1289,12 @@ def olvide_password():
                 "Si tú no pediste esto, ignora este mensaje."
             )
             if tipo == "cliente":
-                enviar_whatsapp(telefono_whatsapp_e164(user["telefono"]), cuerpo)
+                enviar_whatsapp_primer_contacto(
+                    telefono_whatsapp_e164(user["telefono"]),
+                    "TWILIO_TEMPLATE_RESET_PASSWORD_SID",
+                    {"1": user["name"], "2": link},
+                    cuerpo,
+                )
             else:
                 enviar_email(user["email"], "Recuperar contraseña — RE-PVC", cuerpo)
         mensaje = (
@@ -1446,8 +1536,10 @@ def registro():
         )
         db.commit()
         link = url_absoluta("verificar_correo", token=token)
-        enviado = enviar_whatsapp(
+        enviado = enviar_whatsapp_primer_contacto(
             telefono_whatsapp_e164(telefono),
+            "TWILIO_TEMPLATE_VERIFICACION_SID",
+            {"1": name, "2": link},
             f"Hola {name},\n\nGracias por registrarte en RE-PVC. Confirma tu cuenta entrando a este enlace:\n{link}\n\n"
             "Si tú no creaste esta cuenta, ignora este mensaje.",
         )
@@ -1503,8 +1595,10 @@ def cliente_verificar_correo(user):
         db.execute("UPDATE users SET verificacion_token = ? WHERE id = ?", (token, user["id"]))
         db.commit()
         link = url_absoluta("verificar_correo", token=token)
-        enviado = enviar_whatsapp(
+        enviado = enviar_whatsapp_primer_contacto(
             telefono_whatsapp_e164(user["telefono"]),
+            "TWILIO_TEMPLATE_VERIFICACION_SID",
+            {"1": user["name"], "2": link},
             f"Hola {user['name']},\n\nConfirma tu cuenta entrando a este enlace:\n{link}",
         )
         if enviado:
@@ -4263,15 +4357,21 @@ def cliente_confirmar_asistencia(user, publicacion_id):
 @app.route("/webhook/whatsapp", methods=["POST"])
 def webhook_whatsapp():
     """Recibe los mensajes entrantes de WhatsApp que reenvía Twilio (sandbox o número real).
-    Solo para pruebas: registra el mensaje en consola y responde algo genérico. Twilio espera
-    una respuesta en TwiML (XML); si no quieres contestar nada, basta un <Response/> vacío.
-    Nota: esto no valida la firma X-Twilio-Signature — antes de usarlo en producción hay que
-    verificarla para confirmar que la petición viene realmente de Twilio."""
+    Valida primero que la petición realmente venga de Twilio (firma X-Twilio-Signature) — si no,
+    la rechaza sin procesarla, para que nadie pueda mandarle mensajes falsos a este endpoint
+    público haciéndose pasar por WhatsApp. Hoy no hay ningún flujo que dependa de leer lo que
+    contesta el paciente (la confirmación de cuenta y de contraseña se hacen dando clic en un
+    enlace, no respondiendo texto) — así que solo registra el mensaje en consola y contesta un
+    acuse genérico. Twilio espera una respuesta en TwiML (XML)."""
+    firma_recibida = request.headers.get("X-Twilio-Signature", "")
+    if not validar_firma_twilio(_url_publica_actual(), request.form.to_dict(), firma_recibida):
+        return ("Firma inválida.", 403)
+
     remitente = request.form.get("From", "")
     cuerpo = request.form.get("Body", "")
     print(f"[webhook_whatsapp] Mensaje de {remitente}: {cuerpo!r}")
 
-    respuesta_texto = "Gracias por tu mensaje. Este es el sandbox de pruebas de Rutas de Recolección."
+    respuesta_texto = "Gracias por tu mensaje. Por ahora este número no atiende respuestas — para dudas, contáctanos directamente."
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         f"<Response><Message>{respuesta_texto}</Message></Response>"
