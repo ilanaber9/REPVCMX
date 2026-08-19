@@ -91,6 +91,13 @@ DIAS_VACACIONES_DEFAULT = 12
 DURACION_MAXIMA_RUTA_MIN = 7 * 60 + 30  # 7:30 hrs por ruta antes de dividirla en otra
 MIN_PARADAS_POR_RUTA = 12  # buscamos que cada ruta traiga al menos este número de pacientes,
 # para juntar más material por día y ser más rentables en vez de mandar camionetas a medio llenar
+MIN_PARADAS_DESPACHO = 8  # piso real: por debajo de esto no es rentable mandar la camioneta solo
+# por esa tanda (a diferencia de MIN_PARADAS_POR_RUTA, que es solo la aspiración de llenado). Si
+# una tanda queda por debajo, primero se intenta fusionar con la ruta planificada más cercana
+# (de cualquier zona, ver fusionar_grupo_pequeno_con_ruta_vecina); si no cabe en ninguna, esos
+# pacientes se quedan pendientes para la siguiente corrida —salvo el caso de un paciente aislado
+# y lejano sin ninguna ruta cercana, que en vez de quedar esperando en silencio le avisa al admin
+# (ver intentar_despachar_grupo_pequeno) para que decida si vale la pena mandar la camioneta.
 DISTANCIA_ZONA_LEJANA_KM = 60  # en línea recta desde el depósito: más allá de esto, ya de por sí
 # hay que manejar mucho para llegar, así que conviene la excepción de abajo en vez de mandar la
 # camioneta varias veces a medio llenar
@@ -391,6 +398,115 @@ def limitar_cajas_grupo(db, grupo):
 
     grupo_filtrado = [p for idx, p in enumerate(grupo) if idx in incluidos]
     return grupo_filtrado, sobrantes
+
+
+def _centroide(puntos):
+    con_coords = [p for p in puntos if p.get("lat") is not None and p.get("lon") is not None]
+    if not con_coords:
+        return None
+    return (
+        sum(p["lat"] for p in con_coords) / len(con_coords),
+        sum(p["lon"] for p in con_coords) / len(con_coords),
+    )
+
+
+def fusionar_grupo_pequeno_con_ruta_vecina(db, grupo):
+    """grupo quedó por debajo de MIN_PARADAS_DESPACHO. Busca, entre las rutas ya planificadas y
+    sin iniciar (de cualquier zona), la más cercana geográficamente a este grupo donde quepan
+    estos pacientes sin pasar el tope de duración que le corresponda a esa ruta combinada. Si
+    encuentra una, agrega ahí las paradas (reordenadas por cercanía) y regresa la lista de ids de
+    las paradas nuevas (las de este grupo; las que ya tenía la ruta no cambian). Si ninguna tiene
+    espacio, no toca nada y regresa None."""
+    centro = _centroide(grupo)
+    if centro is None:
+        return None
+    candidatas = db.execute(
+        "SELECT * FROM rutas WHERE estado = 'planificada' AND hora_inicio_real IS NULL"
+    ).fetchall()
+    if not candidatas:
+        return None
+
+    def puntos_de_ruta(ruta_id):
+        return [dict(p) for p in db.execute(
+            "SELECT s.id, s.lat, s.lon, p.tipo, p.solicitud_extra_id AS extra_id, p.tipo_extra "
+            "FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+            "WHERE p.ruta_id = ? ORDER BY p.orden",
+            (ruta_id,),
+        ).fetchall()]
+
+    def distancia_a_ruta(ruta):
+        centro_ruta = _centroide(puntos_de_ruta(ruta["id"]))
+        if centro_ruta is None:
+            return float("inf")
+        return haversine_km(centro[0], centro[1], centro_ruta[0], centro_ruta[1])
+
+    for ruta in sorted(candidatas, key=distancia_a_ruta):
+        puntos_ruta = puntos_de_ruta(ruta["id"])
+        combinado = ordenar_por_cercania(puntos_ruta + grupo)
+        estimado = estimar_ruta(combinado)
+        tope = _tope_efectivo_grupo(combinado, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN)
+        if not estimado or estimado["minutos"] > tope:
+            continue
+        ids_del_grupo = {p["id"] for p in grupo}
+        db.execute("DELETE FROM paradas WHERE ruta_id = ?", (ruta["id"],))
+        parada_ids_nuevas = []
+        for i, p in enumerate(combinado, start=1):
+            cur_parada = db.execute(
+                "INSERT INTO paradas (ruta_id, solicitud_id, solicitud_extra_id, tipo_extra, orden, tipo) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (ruta["id"], p["id"], p.get("extra_id"), p.get("tipo_extra"), i, p["tipo"]),
+            )
+            if p["id"] in ids_del_grupo:
+                parada_ids_nuevas.append(cur_parada.lastrowid)
+            db.execute("UPDATE solicitudes SET estado = 'programada', zona = ? WHERE id = ?", (ruta["zona"], p["id"]))
+            if p.get("extra_id"):
+                db.execute(
+                    "UPDATE solicitudes SET estado = 'programada', zona = ? WHERE id = ?",
+                    (ruta["zona"], p["extra_id"]),
+                )
+        return parada_ids_nuevas
+    return None
+
+
+def _grupo_aislado_lejano(grupo):
+    """True si el grupo es un único paciente cuya ruta, aunque fuera solo, ya excede el tope
+    normal de 7:30 por sí mismo —el caso que dividir_puntos_por_duracion deja solo en su tanda
+    porque no hay forma de combinarlo con nadie más sin pasarse del tope."""
+    if len(grupo) != 1:
+        return False
+    estimado = estimar_ruta(grupo)
+    return bool(estimado and estimado["minutos"] > DURACION_MAXIMA_RUTA_MIN)
+
+
+def intentar_despachar_grupo_pequeno(db, grupo):
+    """grupo quedó por debajo de MIN_PARADAS_DESPACHO. Primero intenta fusionarlo con la ruta
+    planificada más cercana (ver fusionar_grupo_pequeno_con_ruta_vecina). Si no cupo en ninguna:
+    un paciente aislado y lejano (sin vecinos ni ruta cercana posible) le avisa al admin en vez de
+    dejarlo esperando en silencio, porque nunca va a juntar el mínimo por sí solo; cualquier otro
+    caso simplemente se queda pendiente para la siguiente corrida. Devuelve
+    (resultado, parada_ids_nuevas) donde resultado es 'fusionado', 'aviso' o 'pendiente'."""
+    parada_ids_nuevas = fusionar_grupo_pequeno_con_ruta_vecina(db, grupo)
+    if parada_ids_nuevas is not None:
+        return "fusionado", parada_ids_nuevas
+    if _grupo_aislado_lejano(grupo):
+        p = grupo[0]
+        sol = db.execute(
+            "SELECT cliente_id, nombre_contacto, direccion FROM solicitudes WHERE id = ?", (p["id"],)
+        ).fetchone()
+        nombre = sol["nombre_contacto"] if sol else None
+        cliente_id = sol["cliente_id"] if sol else None
+        if cliente_id:
+            cliente = db.execute("SELECT name FROM users WHERE id = ?", (cliente_id,)).fetchone()
+            nombre = cliente["name"] if cliente else nombre
+        crear_notificacion_admin(
+            db, cliente_id,
+            f"{nombre or 'Un paciente'} está demasiado lejos de cualquier otra ruta o paciente "
+            f"(dirección: {sol['direccion'] if sol else '?'}) para juntar el mínimo de "
+            f"{MIN_PARADAS_DESPACHO} paradas. No se le creó ruta automáticamente — revisa si vale "
+            "la pena mandar la camioneta solo por él o esperar a que se sume alguien más cerca.",
+        )
+        return "aviso", []
+    return "pendiente", []
 
 
 def siguiente_numero_ruta(db):
@@ -1027,6 +1143,11 @@ def reequilibrar_rutas_zona(db, zona, nueva_solicitud_id=None):
 
     proximo_numero_ruta = siguiente_numero_ruta(db)
     parada_ids_nuevas = []
+    # A diferencia de admin_rutas_masivas (que crea rutas desde cero), aquí NO se aplica el piso
+    # MIN_PARADAS_DESPACHO: esta zona ya tenía al menos una ruta planificada con pacientes que
+    # probablemente ya fueron notificados ("tu recolección quedó programada..."). Aunque el
+    # reajuste deje una tanda por debajo del mínimo, se sigue creando su ruta en vez de arriesgarse
+    # a desprogramar a alguien que ya avisamos.
     for idx, grupo in enumerate(grupos, start=1):
         if idx == 1:
             nombre_ruta = zona
@@ -3189,6 +3310,9 @@ def admin_rutas_masivas(user):
         paradas_creadas = 0
         zonas_omitidas = []
         solicitudes_cajas_omitidas = 0
+        pacientes_fusionados_a_vecina = 0
+        pacientes_bajo_minimo_pendientes = 0
+        pacientes_aislados_avisados = 0
         proximo_numero_ruta = siguiente_numero_ruta(db)
         parada_ids_nuevas = []
         for zona in zonas_seleccionadas:
@@ -3205,12 +3329,17 @@ def admin_rutas_masivas(user):
             ).fetchall()
             if not puntos_raw:
                 continue
-            # El orden de puntos_raw (por última recolección: quien lleva más esperando primero,
-            # y los pacientes nuevos —sin recolección previa— entran por su fecha de alta) decide
-            # en qué ruta/tanda cae cada quien cuando la zona no cabe completa en una sola ruta de
-            # 7:30 hrs. Dentro de cada tanda ya armada, ordenar_grupo_por_cercania reacomoda el
-            # recorrido por cercanía real para que el manejo sea eficiente.
+            # Se reordena por cercanía real (vecino más cercano desde el depósito) antes de
+            # dividir en tandas: así cada ruta agrupa pacientes que ya están juntos en el
+            # trayecto, en vez de que quién cae en qué tanda dependa de su fecha de alta/última
+            # recolección —eso dejaba tandas finales a medio llenar aunque hubiera pacientes
+            # cercanos disponibles para completarlas—. Dentro de cada tanda ya armada,
+            # ordenar_grupo_por_cercania todavía reacomoda el orden de visita para el manejo.
+            # Nota: como limitar_cajas_grupo (abajo) usa el orden de cada tanda para decidir a
+            # quién le toca prioridad cuando no caben todas las solicitudes de cajas, esa
+            # prioridad ahora es por cercanía dentro de la tanda en vez de por tiempo de espera.
             puntos = fusionar_puntos_mismo_cliente(puntos_raw)
+            puntos = ordenar_por_cercania(puntos)
             grupos_sin_filtrar = dividir_puntos_por_duracion(puntos)
             grupos = []
             for grupo_crudo in grupos_sin_filtrar:
@@ -3218,8 +3347,20 @@ def admin_rutas_masivas(user):
                 solicitudes_cajas_omitidas += len(sobrantes)
                 if grupo_filtrado:
                     grupos.append(ordenar_grupo_por_cercania(grupo_filtrado))
-            for idx, grupo in enumerate(grupos, start=1):
-                if idx == 1:
+            n_rutas_zona = 0
+            for grupo in grupos:
+                if len(grupo) < MIN_PARADAS_DESPACHO:
+                    resultado, paradas_fusion_nuevas = intentar_despachar_grupo_pequeno(db, grupo)
+                    if resultado == "fusionado":
+                        pacientes_fusionados_a_vecina += len(grupo)
+                        parada_ids_nuevas.extend(paradas_fusion_nuevas)
+                    elif resultado == "aviso":
+                        pacientes_aislados_avisados += len(grupo)
+                    else:
+                        pacientes_bajo_minimo_pendientes += len(grupo)
+                    continue
+                n_rutas_zona += 1
+                if n_rutas_zona == 1:
                     nombre_ruta = zona
                 else:
                     estimado_grupo = estimar_ruta(grupo)
@@ -3264,7 +3405,27 @@ def admin_rutas_masivas(user):
                 f"máximo de {CAJAS_MAX_ENTREGA_RUTA} cajas de entrega o {CAJAS_MAX_RECEPCION_RUTA} de "
                 "recepción por ruta; quedaron pendientes para otra ruta."
             )
-        flash(mensaje, "success" if not zonas_omitidas and not solicitudes_cajas_omitidas else "error")
+        if pacientes_fusionados_a_vecina:
+            mensaje += (
+                f" {pacientes_fusionados_a_vecina} paciente(s) no juntaban el mínimo de "
+                f"{MIN_PARADAS_DESPACHO} en su zona y se integraron a la ruta planificada más cercana."
+            )
+        if pacientes_bajo_minimo_pendientes:
+            mensaje += (
+                f" {pacientes_bajo_minimo_pendientes} paciente(s) quedaron pendientes por no juntar "
+                f"el mínimo de {MIN_PARADAS_DESPACHO} ni tener una ruta cercana con espacio; se "
+                "revisan en la siguiente corrida."
+            )
+        if pacientes_aislados_avisados:
+            mensaje += (
+                f" {pacientes_aislados_avisados} paciente(s) están demasiado aislados para juntar el "
+                "mínimo — se te avisó en notificaciones para que decidas caso por caso."
+            )
+        hubo_pendientes = pacientes_bajo_minimo_pendientes or pacientes_aislados_avisados
+        flash(
+            mensaje,
+            "success" if not zonas_omitidas and not solicitudes_cajas_omitidas and not hubo_pendientes else "error",
+        )
         return redirect(url_for("admin_dashboard", tab="rutas"))
 
     zonas = db.execute(

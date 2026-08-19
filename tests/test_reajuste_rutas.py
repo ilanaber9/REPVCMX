@@ -41,10 +41,33 @@ import app as appmod  # noqa: E402  (import después de fijar DATABASE_PATH a pr
 
 
 def nueva_db_conn():
-    """Abre una conexión nueva a la BD de prueba (schema y datos ya cargados por init_db())."""
+    """Abre una conexión nueva a la BD compartida de prueba (schema y datos ya cargados por
+    init_db() al importar app.py). Solo la usan las pruebas que pasan por el servidor Flask real
+    (get_db() lee la ruta fija DATABASE_PATH), donde no hay forma de aislar por test."""
     conn = sqlite3.connect(_tmp_db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+_temp_files_aislados = []
+
+
+def nueva_db_aislada():
+    """Crea una base de datos temporal propia (schema real, sin datos) para un solo test,
+    completamente aislada de las demás. Necesario desde que existe la fusión con ruta vecina
+    (fusionar_grupo_pequeno_con_ruta_vecina): busca entre TODAS las rutas planificadas sin
+    filtrar por zona, así que si varias pruebas compartieran la misma BD, una podría acabar
+    fusionándose por accidente con sobrantes de otra prueba anterior."""
+    fd, path = tempfile.mkstemp(prefix="test_rutas_aislada_", suffix=".db")
+    os.close(fd)
+    os.remove(path)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    with open(appmod.SCHEMA_PATH) as f:
+        conn.executescript(f.read())
+    _temp_files_aislados.append(path)
     return conn
 
 
@@ -53,10 +76,11 @@ import atexit  # noqa: E402
 
 @atexit.register
 def _limpiar_db_temporal():
-    try:
-        os.remove(_tmp_db_path)
-    except OSError:
-        pass
+    for path in [_tmp_db_path] + _temp_files_aislados:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 DEPOT = (appmod.DEPOT_LAT, appmod.DEPOT_LON)
@@ -76,6 +100,16 @@ def punto_lejano(offset_km=90):
     lejana (> DISTANCIA_ZONA_LEJANA_KM)."""
     grados = offset_km / 111.0
     return appmod.DEPOT_LAT + grados, appmod.DEPOT_LON
+
+
+def punto_en_cluster_denso(indice, ancho=10, paso=0.006, centro=None):
+    """Rejilla más densa (~650 m entre puntos) que punto_cerca_deposito, para simular una zona
+    real con muchos pacientes concentrados en una colonia y forzar que haga falta más de una
+    ruta."""
+    centro_lat, centro_lon = centro or (appmod.DEPOT_LAT + 0.05, appmod.DEPOT_LON + 0.05)
+    fila = indice // ancho
+    col = indice % ancho
+    return centro_lat + (fila - ancho / 2) * paso, centro_lon + (col - ancho / 2) * paso
 
 
 def insertar_solicitud(conn, lat, lon, nombre="Paciente Prueba", zona=None, estado="pendiente",
@@ -173,7 +207,7 @@ class TestReequilibrarRutasZona(unittest.TestCase):
     o pide recolección en una zona con cobertura."""
 
     def setUp(self):
-        self.conn = nueva_db_conn()
+        self.conn = nueva_db_aislada()
 
     def tearDown(self):
         self.conn.close()
@@ -297,6 +331,339 @@ class TestReequilibrarRutasZona(unittest.TestCase):
         parada_fusionada = [p for p in paradas_despues if p["solicitud_id"] == id_original]
         self.assertEqual(len(parada_fusionada), 1)
         self.assertEqual(parada_fusionada[0]["solicitud_extra_id"], id_extra)
+
+    def test_paciente_nuevo_provoca_mover_a_otros_a_la_ruta_que_les_toca(self):
+        """Caso central del pedido: mientras se arman las rutas de una zona pueden llegar
+        inscripciones nuevas. Si las rutas ya planificadas quedaron mal agrupadas (p. ej. mezcladas
+        entre dos colonias separadas, como podría pasar si se crearon a mano o en otro momento) y
+        llega un paciente nuevo, reequilibrar_rutas_zona no debe limitarse a acomodar solo al
+        nuevo donde quepa: tiene que recalcular TODA la zona, así que cualquier paciente que no
+        quedó agrupado por cercanía se mueve a la ruta que sí le corresponde geográficamente."""
+        zona = "Zona Prueba D"
+        centro_a = (appmod.DEPOT_LAT + 0.05, appmod.DEPOT_LON + 0.09)
+        centro_b = (appmod.DEPOT_LAT + 0.05, appmod.DEPOT_LON - 0.09)  # ~19 km de la colonia A
+
+        cluster_de = {}
+        ids_a, ids_b = [], []
+        for i in range(20):
+            lat, lon = punto_en_cluster_denso(i, ancho=5, paso=0.006, centro=centro_a)
+            sid = insertar_solicitud(self.conn, lat, lon, nombre=f"Colonia A {i}", zona=zona, estado="programada")
+            ids_a.append(sid)
+            cluster_de[sid] = "A"
+        for i in range(20):
+            lat, lon = punto_en_cluster_denso(i, ancho=5, paso=0.006, centro=centro_b)
+            sid = insertar_solicitud(self.conn, lat, lon, nombre=f"Colonia B {i}", zona=zona, estado="programada")
+            ids_b.append(sid)
+            cluster_de[sid] = "B"
+
+        # Rutas iniciales deliberadamente mal agrupadas: cada una mezcla mitad de la colonia A
+        # con mitad de la colonia B, como si nunca se hubieran ordenado por cercanía.
+        self._crear_ruta_planificada(zona, ids_a[:10] + ids_b[:10])
+        self._crear_ruta_planificada(zona, ids_a[10:] + ids_b[10:])
+
+        lat_nuevo, lon_nuevo = punto_en_cluster_denso(20, ancho=5, paso=0.006, centro=centro_a)
+        nuevo_id = insertar_solicitud(self.conn, lat_nuevo, lon_nuevo, nombre="Colonia A nuevo",
+                                       zona=zona, estado="pendiente")
+        cluster_de[nuevo_id] = "A"
+
+        id_max_antes = self.conn.execute("SELECT COALESCE(MAX(id), 0) AS n FROM rutas").fetchone()["n"]
+        appmod.reequilibrar_rutas_zona(self.conn, zona, nueva_solicitud_id=nuevo_id)
+
+        # Las rutas 2+ que resultan del reequilibrio se renombran "Ruta NN (km)" y ese mismo
+        # nombre se les pone también como zona (ver reequilibrar_rutas_zona) — así que solo la
+        # primera conserva zona == zona original. Para traerlas todas, comparamos por id.
+        rutas = self.conn.execute("SELECT * FROM rutas WHERE id > ?", (id_max_antes,)).fetchall()
+        self.assertGreaterEqual(len(rutas), 2, "41 pacientes en dos colonias separadas deberían necesitar 2+ rutas")
+
+        ids_en_paradas = set()
+        print(f"\n[Reequilibrio con colonias mezcladas] -> {len(rutas)} ruta(s) tras integrar al nuevo:")
+        for ruta in rutas:
+            paradas = self.conn.execute(
+                "SELECT solicitud_id FROM paradas WHERE ruta_id=?", (ruta["id"],)
+            ).fetchall()
+            colonias_por_parada = [cluster_de[p["solicitud_id"]] for p in paradas]
+            ids_en_paradas.update(p["solicitud_id"] for p in paradas)
+            conteo = {c: colonias_por_parada.count(c) for c in set(colonias_por_parada)}
+            print(f"  - {ruta['nombre']}: {len(paradas)} paradas, colonias {conteo}")
+            # Tolera cuando mucho 1 paciente "frontera" de la colonia minoritaria por ruta (el
+            # vecino más cercano puede caer justo en el límite de tiempo entre una colonia y la
+            # otra); lo que no debe pasar es que una ruta quede genuinamente mitad y mitad.
+            minoria = min(conteo.values()) if len(conteo) > 1 else 0
+            self.assertLessEqual(
+                minoria, 1,
+                f"{ruta['nombre']} quedó mezclando colonias casi parejo {conteo} — no se reagrupó por cercanía",
+            )
+
+        # nadie se perdió y el paciente nuevo quedó incluido
+        self.assertEqual(ids_en_paradas, set(cluster_de.keys()))
+        self.assertIn(nuevo_id, ids_en_paradas)
+
+        # como las rutas originales mezclaban A y B a propósito, para que ahora cada ruta sea de
+        # una sola colonia, forzosamente varios pacientes tuvieron que cambiar de ruta.
+        ids_originales_ruta1 = set(ids_a[:10] + ids_b[:10])
+        rutas_finales_por_id = {}
+        for ruta in rutas:
+            for p in self.conn.execute("SELECT solicitud_id FROM paradas WHERE ruta_id=?", (ruta["id"],)):
+                rutas_finales_por_id[p["solicitud_id"]] = ruta["id"]
+        rutas_distintas_dentro_del_grupo_original = len(
+            {rutas_finales_por_id[sid] for sid in ids_originales_ruta1}
+        )
+        self.assertGreater(
+            rutas_distintas_dentro_del_grupo_original, 1,
+            "los pacientes que antes compartían ruta (mal agrupados) deberían haberse separado "
+            "en rutas distintas al reagruparse por colonia",
+        )
+
+
+class _BaseFlaskAislado(unittest.TestCase):
+    """Base para pruebas que necesitan pasar por el servidor Flask real (test_client), no solo
+    llamar las funciones directo. get_db() lee la ruta fija appmod.DB_PATH, así que cada test la
+    apunta a su propia base temporal aislada (con su propio admin y recolector) para no
+    contaminarse con rutas que hayan quedado de otra prueba — importante desde que existe la
+    fusión con ruta vecina, que busca entre TODAS las rutas planificadas de la base."""
+
+    def setUp(self):
+        fd, path = tempfile.mkstemp(prefix="test_rutas_flask_", suffix=".db")
+        os.close(fd)
+        os.remove(path)
+        self._db_path_original = appmod.DB_PATH
+        appmod.DB_PATH = path
+        _temp_files_aislados.append(path)
+
+        self.conn = sqlite3.connect(path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        with open(appmod.SCHEMA_PATH) as f:
+            self.conn.executescript(f.read())
+        self.conn.execute(
+            "INSERT INTO users (name, email, password_hash, role) VALUES "
+            "('Administrador', 'admin@rutas.local', ?, 'admin')",
+            (appmod.generate_password_hash("admin123", method="pbkdf2:sha256"),),
+        )
+        cur = self.conn.execute(
+            "INSERT INTO users (name, email, password_hash, role) VALUES "
+            "('Recolector Test', 'recolector.test@rutas.local', ?, 'recolector')",
+            (appmod.generate_password_hash("x", method="pbkdf2:sha256"),),
+        )
+        self.recolector_id = cur.lastrowid
+        self.conn.commit()
+
+        self.client = appmod.app.test_client()
+        resp = self.client.post(
+            "/login", data={"email": "admin@rutas.local", "password": "admin123"}, follow_redirects=False
+        )
+        self.assertEqual(resp.status_code, 302, "no se pudo iniciar sesión como admin para la prueba")
+
+    def tearDown(self):
+        self.conn.close()
+        appmod.DB_PATH = self._db_path_original
+
+
+class TestZonaConMuchosPacientes(_BaseFlaskAislado):
+    """Simula el caso real: una zona con muchísimos pacientes pendientes, todos concentrados en
+    la misma colonia, y usa el flujo real de "Crear rutas por zona" (POST a
+    /admin/rutas/masivas, el mismo botón que usa el admin) para verificar que se resuelve
+    abriendo varias rutas por cercanía en vez de una sola gigante o de repartir parejo."""
+
+    N_PACIENTES = 80
+    ZONA = "Zona Masiva Test"
+
+    def setUp(self):
+        super().setUp()
+        for i in range(self.N_PACIENTES):
+            lat, lon = punto_en_cluster_denso(i)
+            insertar_solicitud(self.conn, lat, lon, nombre=f"Paciente masivo {i}", zona=self.ZONA)
+
+    def test_zona_densa_se_reparte_en_varias_rutas_maximizadas(self):
+        resp = self.client.post(
+            "/admin/rutas/masivas",
+            data={
+                "zonas": [self.ZONA],
+                "fecha": "2026-08-25",
+                "hora_salida": "08:00",
+                f"recolector_id__{self.ZONA}": str(self.recolector_id),
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302, "el POST a /admin/rutas/masivas no redirigió (¿falló?)")
+
+        rutas = self.conn.execute(
+            "SELECT * FROM rutas WHERE zona = ? OR nombre = ? ORDER BY id", (self.ZONA, self.ZONA)
+        ).fetchall()
+        # Las tandas 2, 3... se renombran "Ruta NN (km)" y también quedan con zona propia (ver
+        # admin_rutas_masivas), así que hay que traerlas todas por el rango de ids de esta corrida.
+        primera = self.conn.execute("SELECT MIN(id) AS n FROM rutas WHERE zona = ?", (self.ZONA,)).fetchone()["n"]
+        todas_las_rutas = self.conn.execute("SELECT * FROM rutas WHERE id >= ? ORDER BY id", (primera,)).fetchall()
+
+        print(f"\n[Zona con {self.N_PACIENTES} pacientes] -> {len(todas_las_rutas)} ruta(s) generada(s):")
+        total_paradas = 0
+        for ruta in todas_las_rutas:
+            paradas = self.conn.execute(
+                "SELECT s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+                "WHERE p.ruta_id = ?", (ruta["id"],),
+            ).fetchall()
+            total_paradas += len(paradas)
+            estimado = appmod.estimar_ruta(paradas)
+            print(f"  - {ruta['nombre']}: {len(paradas)} paradas, {estimado['duracion'] if estimado else '?'}")
+
+            self.assertGreaterEqual(
+                len(paradas), 1, f"la ruta {ruta['nombre']} se creó sin paradas"
+            )
+            if estimado and len(paradas) > 1:
+                self.assertLessEqual(
+                    estimado["minutos"], appmod.DURACION_MAXIMA_RUTA_MIN,
+                    f"{ruta['nombre']} se pasó de las 7:30 hrs ({estimado['duracion']})",
+                )
+
+        # cobertura completa: todos los pacientes de la zona quedaron programados en alguna ruta
+        self.assertEqual(total_paradas, self.N_PACIENTES)
+
+        # se abrieron varias rutas en vez de una sola o de una por paciente
+        self.assertGreater(len(todas_las_rutas), 1, "80 pacientes cercanos deberían requerir más de 1 ruta")
+        self.assertLess(len(todas_las_rutas), self.N_PACIENTES // appmod.MIN_PARADAS_POR_RUTA + 3,
+                         "salieron demasiadas rutas para la cantidad de pacientes: no se está maximizando cada una")
+
+        # cada ruta —salvo quizá la última— debe quedar bien llena de tiempo o de paradas; si
+        # varias tandas quedan muy por debajo del tope habiendo pacientes cercanos disponibles,
+        # es señal de que no se está agrupando por cercanía antes de dividir en tandas.
+        for ruta in todas_las_rutas[:-1]:
+            paradas = self.conn.execute(
+                "SELECT s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+                "WHERE p.ruta_id = ?", (ruta["id"],),
+            ).fetchall()
+            estimado = appmod.estimar_ruta(paradas)
+            llena_de_tiempo = estimado and estimado["minutos"] >= appmod.DURACION_MAXIMA_RUTA_MIN * 0.75
+            llena_de_paradas = len(paradas) >= appmod.MIN_PARADAS_POR_RUTA
+            self.assertTrue(
+                llena_de_tiempo or llena_de_paradas,
+                f"{ruta['nombre']} quedó con solo {len(paradas)} paradas "
+                f"({estimado['duracion'] if estimado else '?'}) pudiendo llenarse más",
+            )
+
+
+class TestMinimoDeDespacho(_BaseFlaskAislado):
+    """No debe crearse (ni despacharse) una ruta de muy pocos pacientes —MIN_PARADAS_DESPACHO,
+    hoy 8— porque no es rentable mandar la camioneta un día entero por eso. Cubre las 3 salidas
+    posibles cuando una tanda queda por debajo del mínimo al crear rutas desde cero: se fusiona
+    con la ruta planificada más cercana, se queda pendiente si no hay ninguna cerca, o —si es un
+    paciente aislado y lejano que nunca va a juntar el mínimo por sí solo— se avisa al admin en
+    vez de dejarlo esperando en silencio."""
+
+    def test_grupo_chico_se_fusiona_con_ruta_vecina_con_espacio(self):
+        centro = (appmod.DEPOT_LAT + 0.03, appmod.DEPOT_LON + 0.03)
+        ids_ruta_existente = []
+        for i in range(6):
+            lat, lon = punto_en_cluster_denso(i, ancho=3, paso=0.004, centro=centro)
+            sid = insertar_solicitud(self.conn, lat, lon, nombre=f"Ya en ruta {i}", zona="Zona Vecina", estado="programada")
+            ids_ruta_existente.append(sid)
+        cur = self.conn.execute(
+            "INSERT INTO rutas (nombre, zona, fecha, hora_salida, recolector_id, estado) "
+            "VALUES ('Zona Vecina', 'Zona Vecina', '2026-08-25', '08:00', ?, 'planificada')",
+            (self.recolector_id,),
+        )
+        ruta_vecina_id = cur.lastrowid
+        for i, sid in enumerate(ids_ruta_existente, start=1):
+            self.conn.execute(
+                "INSERT INTO paradas (ruta_id, solicitud_id, orden, tipo) VALUES (?, ?, ?, 'recoleccion')",
+                (ruta_vecina_id, sid, i),
+            )
+        self.conn.commit()
+
+        zona_chica = "Zona Chica"
+        ids_chicos = []
+        for i in range(4):
+            lat, lon = punto_en_cluster_denso(i, ancho=2, paso=0.004, centro=centro)
+            sid = insertar_solicitud(self.conn, lat, lon, nombre=f"Grupo chico {i}", zona=zona_chica)
+            ids_chicos.append(sid)
+
+        resp = self.client.post(
+            "/admin/rutas/masivas",
+            data={
+                "zonas": [zona_chica],
+                "fecha": "2026-08-25",
+                "hora_salida": "08:00",
+                f"recolector_id__{zona_chica}": str(self.recolector_id),
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+
+        rutas_nuevas_de_zona_chica = self.conn.execute(
+            "SELECT * FROM rutas WHERE zona = ?", (zona_chica,)
+        ).fetchall()
+        self.assertEqual(len(rutas_nuevas_de_zona_chica), 0,
+                          "no debía crearse una ruta aparte para un grupo de 4 (por debajo del mínimo)")
+
+        paradas_vecina = self.conn.execute(
+            "SELECT solicitud_id FROM paradas WHERE ruta_id = ?", (ruta_vecina_id,)
+        ).fetchall()
+        ids_en_vecina = {p["solicitud_id"] for p in paradas_vecina}
+        self.assertTrue(
+            set(ids_chicos).issubset(ids_en_vecina),
+            "los 4 pacientes del grupo chico debían integrarse a la ruta vecina existente",
+        )
+        for sid in ids_chicos:
+            estado = self.conn.execute("SELECT estado FROM solicitudes WHERE id=?", (sid,)).fetchone()["estado"]
+            self.assertEqual(estado, "programada")
+
+    def test_grupo_chico_sin_vecino_queda_pendiente(self):
+        zona_chica = "Zona Chica Sin Vecinos"
+        centro = (appmod.DEPOT_LAT - 0.03, appmod.DEPOT_LON - 0.03)
+        ids_chicos = []
+        for i in range(3):
+            lat, lon = punto_en_cluster_denso(i, ancho=2, paso=0.004, centro=centro)
+            sid = insertar_solicitud(self.conn, lat, lon, nombre=f"Sin vecino {i}", zona=zona_chica)
+            ids_chicos.append(sid)
+
+        resp = self.client.post(
+            "/admin/rutas/masivas",
+            data={
+                "zonas": [zona_chica],
+                "fecha": "2026-08-25",
+                "hora_salida": "08:00",
+                f"recolector_id__{zona_chica}": str(self.recolector_id),
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+
+        rutas_creadas = self.conn.execute("SELECT * FROM rutas WHERE zona = ?", (zona_chica,)).fetchall()
+        self.assertEqual(len(rutas_creadas), 0, "no debía crearse ruta para un grupo de 3 sin ninguna vecina")
+
+        for sid in ids_chicos:
+            estado = self.conn.execute("SELECT estado FROM solicitudes WHERE id=?", (sid,)).fetchone()["estado"]
+            self.assertEqual(estado, "pendiente", "debían quedarse pendientes para la siguiente corrida")
+
+    def test_paciente_aislado_lejano_avisa_al_admin_en_vez_de_quedar_en_silencio(self):
+        zona_lejana = "Zona Lejana Sola"
+        lat, lon = punto_lejano(300)  # a velocidad de carretera real (no la de manejo local que
+        # usa el resto del algoritmo), 90 km no bastaba para exceder el tope por sí solo
+        sid = insertar_solicitud(self.conn, lat, lon, nombre="Paciente Muy Lejos", zona=zona_lejana)
+
+        notificaciones_antes = self.conn.execute("SELECT COUNT(*) AS n FROM notificaciones_admin").fetchone()["n"]
+
+        resp = self.client.post(
+            "/admin/rutas/masivas",
+            data={
+                "zonas": [zona_lejana],
+                "fecha": "2026-08-25",
+                "hora_salida": "08:00",
+                f"recolector_id__{zona_lejana}": str(self.recolector_id),
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+
+        rutas_creadas = self.conn.execute("SELECT * FROM rutas WHERE zona = ?", (zona_lejana,)).fetchall()
+        self.assertEqual(len(rutas_creadas), 0, "un paciente aislado y lejano no debía despacharse solo")
+
+        estado = self.conn.execute("SELECT estado FROM solicitudes WHERE id=?", (sid,)).fetchone()["estado"]
+        self.assertEqual(estado, "pendiente")
+
+        notificaciones_despues = self.conn.execute(
+            "SELECT * FROM notificaciones_admin ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        notificaciones_count = self.conn.execute("SELECT COUNT(*) AS n FROM notificaciones_admin").fetchone()["n"]
+        self.assertEqual(notificaciones_count, notificaciones_antes + 1,
+                          "debía crearse una notificación para el admin sobre este paciente aislado")
+        self.assertIn("Paciente Muy Lejos", notificaciones_despues["mensaje"])
 
 
 if __name__ == "__main__":
