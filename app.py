@@ -2195,10 +2195,38 @@ def admin_dashboard(user):
         "SELECT * FROM vacaciones_registros ORDER BY fecha_inicio DESC"
     ).fetchall()
 
+    auditoria_sin_zona = db.execute(
+        "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, s.material, "
+        "s.tipo_redistribucion, s.estado FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
+        "WHERE s.estado IN ('pendiente', 'pendiente_entrega') AND s.zona IS NULL "
+        "ORDER BY s.created_at"
+    ).fetchall()
+    auditoria_sin_coordenadas = db.execute(
+        "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, s.zona, s.estado "
+        "FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
+        "WHERE s.estado IN ('pendiente', 'pendiente_entrega') AND s.zona IS NOT NULL "
+        "AND (s.lat IS NULL OR s.lon IS NULL) ORDER BY s.created_at"
+    ).fetchall()
+    auditoria_programada_sin_ruta = db.execute(
+        "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, s.zona, s.estado "
+        "FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
+        "WHERE s.estado = 'programada' AND NOT EXISTS ("
+        "  SELECT 1 FROM paradas p JOIN rutas r ON r.id = p.ruta_id "
+        "  WHERE r.estado != 'completada' AND (p.solicitud_id = s.id OR p.solicitud_extra_id = s.id)"
+        ") ORDER BY s.created_at"
+    ).fetchall()
+    total_auditoria_rutas = (
+        len(auditoria_sin_zona) + len(auditoria_sin_coordenadas) + len(auditoria_programada_sin_ruta)
+    )
+
     return render_template(
         "admin_dashboard.html",
         pendientes=solicitudes_clientes,
         pendientes_entrega=pendientes_entrega,
+        auditoria_sin_zona=auditoria_sin_zona,
+        auditoria_sin_coordenadas=auditoria_sin_coordenadas,
+        auditoria_programada_sin_ruta=auditoria_programada_sin_ruta,
+        total_auditoria_rutas=total_auditoria_rutas,
         zonas=zonas,
         zona_actual=zona_actual,
         puntos_zona=puntos_zona,
