@@ -9,7 +9,7 @@
   <button type="button" class="tab-btn" data-tab="redistribucion">Redistribución de cajas</button>
   <button type="button" class="tab-btn" data-tab="videos">Videos</button>
   {% if current_user['recibir_info_nef'] %}
-  <button type="button" class="tab-btn" data-tab="nef">NEF</button>
+  <button type="button" class="tab-btn" data-tab="nef" id="tab-btn-nef">NEF{% if nef_nuevas %} ({{ nef_nuevas }}){% endif %}</button>
   {% endif %}
 </div>
 
@@ -324,8 +324,18 @@ function activarTab(tab) {
   if (!valido) tab = 'notificaciones';
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
+  if (tab === 'nef') marcarNefVisto();
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => activarTab(b.dataset.tab)));
 activarTab(new URLSearchParams(location.search).get('tab') || 'notificaciones');
+
+var nefYaMarcado = false;
+function marcarNefVisto() {
+  if (nefYaMarcado) return;
+  nefYaMarcado = true;
+  var btn = document.getElementById('tab-btn-nef');
+  if (btn) btn.textContent = 'NEF';
+  fetch('{{ url_for("cliente_nef_marcar_visto") }}', { method: 'POST' }).catch(() => {});
+}
 </script>
 {% endblock %}

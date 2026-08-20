@@ -2054,6 +2054,7 @@ def cliente_dashboard(user):
         solicitudes.append(sol)
     nef_publicaciones = []
     nef_confirmados = set()
+    nef_nuevas = 0
     if user["recibir_info_nef"]:
         nef_publicaciones = db.execute(
             "SELECT * FROM nef_publicaciones ORDER BY created_at DESC"
@@ -2063,6 +2064,10 @@ def cliente_dashboard(user):
                 "SELECT publicacion_id FROM nef_confirmaciones WHERE cliente_id = ?", (user["id"],)
             ).fetchall()
         }
+        nef_nuevas = db.execute(
+            "SELECT COUNT(*) AS n FROM nef_publicaciones WHERE created_at > ?",
+            (user["nef_ultima_vista"] or "1970-01-01",),
+        ).fetchone()["n"]
     admin_videos = db.execute("SELECT * FROM admin_videos ORDER BY created_at DESC").fetchall()
 
     cajas_donadas = db.execute(
@@ -2086,12 +2091,23 @@ def cliente_dashboard(user):
     return render_template(
         "cliente_dashboard.html", solicitudes=solicitudes,
         solicitud_principal=solicitud_principal,
-        nef_publicaciones=nef_publicaciones, nef_confirmados=nef_confirmados,
+        nef_publicaciones=nef_publicaciones, nef_confirmados=nef_confirmados, nef_nuevas=nef_nuevas,
         admin_videos=admin_videos,
         cajas_donadas=cajas_donadas, cajas_recibidas=cajas_recibidas,
         cajas_donadas_total=cajas_donadas_total, cajas_recibidas_total=cajas_recibidas_total,
         tipos_cajas=TIPOS_CAJAS,
     )
+
+
+@app.route("/cliente/nef/marcar-visto", methods=["POST"])
+@login_required("cliente")
+def cliente_nef_marcar_visto(user):
+    db = get_db()
+    db.execute(
+        "UPDATE users SET nef_ultima_vista = datetime('now','localtime') WHERE id = ?", (user["id"],)
+    )
+    db.commit()
+    return ("", 204)
 
 
 @app.route("/cliente/solicitudes/nueva", methods=["POST"])
@@ -4463,55 +4479,6 @@ def recolector_bote_devuelto(user, parada_id):
 
 # ---------- NEF ----------
 
-def _enviar_invitaciones_nef(publicacion_id):
-    """Manda la invitación de un evento/webinar de NEF a todos los pacientes que pidieron
-    recibir información de NEF. Corre en un hilo aparte (con su propia conexión a la base de
-    datos) para no bloquear la respuesta al crear la publicación."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        pub = conn.execute("SELECT * FROM nef_publicaciones WHERE id = ?", (publicacion_id,)).fetchone()
-        if pub is None:
-            return
-        pacientes = conn.execute(
-            "SELECT name, telefono FROM users WHERE role = 'cliente' AND recibir_info_nef = 1"
-        ).fetchall()
-    finally:
-        conn.close()
-
-    detalles = f"Fecha: {pub['fecha_evento'] or 'por confirmar'}"
-    if pub["hora_evento"]:
-        detalles += f" a las {pub['hora_evento']}"
-    if pub["tipo"] == "evento":
-        if pub["lugar_evento"]:
-            detalles += f"\nLugar: {pub['lugar_evento']}"
-        if pub["lat"] is not None and pub["lon"] is not None:
-            detalles += (
-                f"\nUbicación: https://www.google.com/maps/dir/?api=1&destination={pub['lat']},{pub['lon']}"
-            )
-    else:
-        if pub["link_webinar"]:
-            detalles += f"\nLiga para ingresar: {pub['link_webinar']}"
-
-    for p in pacientes:
-        if not p["telefono"]:
-            continue
-        cuerpo = f"Hola {p['name']},\n\nNEF te invita a: {pub['titulo']}\n\n{detalles}\n\n"
-        if pub["contenido"]:
-            cuerpo += f"{pub['contenido']}\n\n"
-        if pub["tipo"] == "evento":
-            cuerpo += "Puedes confirmar tu asistencia desde tu sesión en RE-PVC, en la pestaña NEF."
-        # El contenido de una publicación es texto libre (fecha, lugar, descripción, ligas) y no
-        # cabe en una plantilla de variables fijas — la plantilla solo manda el aviso corto con el
-        # título, y el detalle completo se ve dentro de la app en cuanto el paciente entra.
-        enviar_whatsapp_primer_contacto(
-            telefono_whatsapp_e164(p["telefono"]),
-            "TWILIO_TEMPLATE_NEF_PUBLICACION_SID",
-            {"1": p["name"], "2": pub["titulo"]},
-            cuerpo,
-        )
-
-
 @app.route("/nef")
 @login_required("nef")
 def nef_dashboard(user):
@@ -4577,12 +4544,7 @@ def nef_nueva_publicacion(user):
         (tipo, titulo, contenido, fecha_evento, hora_evento, lugar_evento, lat, lon, link_webinar, video_archivo),
     )
     db.commit()
-    publicacion_id = cur.lastrowid
-    if tipo in ("evento", "webinar"):
-        threading.Thread(target=_enviar_invitaciones_nef, args=(publicacion_id,), daemon=True).start()
-        flash("Publicación creada. Se están enviando las invitaciones por correo a los pacientes suscritos.", "success")
-    else:
-        flash("Publicación creada.", "success")
+    flash("Publicación creada. Los pacientes suscritos la verán en su sesión, en la pestaña NEF.", "success")
     return redirect(url_for("nef_dashboard", tab=tipo))
 
 
