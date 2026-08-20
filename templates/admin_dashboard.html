@@ -72,6 +72,24 @@
   {% if current_user['es_admin_general'] %}
   <button type="button" class="tab-btn" data-tab="horas_extra">Horas extra</button>
   {% endif %}
+  <button type="button" class="tab-btn" data-tab="reportes">Reportes</button>
+</div>
+
+<div class="tab-panel" data-tab="reportes">
+  <div class="card">
+    <h1 style="margin:0;">Descargar reportes en Excel</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Descarga la información del programa a tu computadora en archivos .xlsx que puedes abrir con Excel.
+    </p>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:12px; margin-top:16px;">
+      <a class="btn secondary" href="{{ url_for('admin_exportar_pacientes') }}">📋 Lista de pacientes</a>
+      <a class="btn secondary" href="{{ url_for('admin_exportar_inventarios') }}">📦 Inventarios</a>
+      <a class="btn secondary" href="{{ url_for('admin_exportar_productividad') }}">📈 Productividad</a>
+      <a class="btn secondary" href="{{ url_for('admin_exportar_rutas_finalizadas') }}">🚚 Rutas finalizadas</a>
+      <a class="btn secondary" href="{{ url_for('admin_exportar_material_recolectado') }}">♻️ Material recolectado</a>
+      <a class="btn secondary" href="{{ url_for('admin_exportar_cajas_entregadas') }}">📦 Cajas entregadas</a>
+    </div>
+  </div>
 </div>
 
 <div class="tab-panel" data-tab="rutas">

@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -21,7 +22,10 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlencode
 
-from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash
+from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash, send_file
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
@@ -61,6 +65,13 @@ ESTADO_LABELS = {
     "ausente": "Nadie en casa",
     "cancelada": "Cancelada",
     "lista_espera": "En lista de espera",
+}
+
+CAUSA_ENFERMEDAD_LABELS = {
+    "diabetes": "Diabetes",
+    "hipertension": "Hipertensión",
+    "autoinmune": "Enfermedad autoinmune",
+    "desconocida": "Desconocida",
 }
 
 # Se usa para toda decisión que dependa de "qué hora es" (el corte de las 9pm para avisos, entre
@@ -143,6 +154,37 @@ def formatear_duracion(minutos):
     if horas:
         return f"{horas} h {mins} min" if mins else f"{horas} h"
     return f"{mins} min"
+
+
+def agregar_hoja_excel(wb, titulo, encabezados, filas):
+    """Agrega una hoja a un Workbook de openpyxl con encabezados en negritas, congelados en la
+    primera fila, y ancho de columna ajustado al contenido más largo (con un tope para que una
+    celda con mucho texto no deje la columna gigante)."""
+    ws = wb.create_sheet(title=titulo[:31])  # Excel no acepta nombres de hoja de más de 31 caracteres
+    ws.append(encabezados)
+    for celda in ws[1]:
+        celda.font = Font(bold=True)
+    ws.freeze_panes = "A2"
+    for fila in filas:
+        ws.append(fila)
+    anchos = [len(str(h)) for h in encabezados]
+    for fila in filas:
+        for i, valor in enumerate(fila):
+            anchos[i] = max(anchos[i], len(str(valor)) if valor is not None else 0)
+    for i, ancho in enumerate(anchos, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = min(ancho + 2, 50)
+    return ws
+
+
+def respuesta_excel(wb, nombre_archivo):
+    """Convierte un Workbook de openpyxl en una respuesta de descarga de Flask."""
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return send_file(
+        buffer, as_attachment=True, download_name=nombre_archivo,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 def _http_get(url, headers=None, timeout=8):
@@ -4066,6 +4108,202 @@ def admin_eliminar_pedido(user, pedido_id):
     db.commit()
     flash("Pedido eliminado.", "success")
     return redirect(url_for("admin_dashboard", tab="pedidos"))
+
+
+# ---------- Reportes (Excel) ----------
+
+@app.route("/admin/reportes/pacientes.xlsx")
+@login_required("admin")
+def admin_exportar_pacientes(user):
+    db = get_db()
+    pacientes_rows = db.execute(
+        "SELECT * FROM users WHERE role = 'cliente' ORDER BY name"
+    ).fetchall()
+    filas = []
+    for p in pacientes_rows:
+        ruta_sol = db.execute(
+            "SELECT s.zona, s.direccion, s.telefono, s.modalidad, r.nombre AS ruta_nombre "
+            "FROM solicitudes s LEFT JOIN paradas pa ON pa.solicitud_id = s.id "
+            "LEFT JOIN rutas r ON r.id = pa.ruta_id WHERE s.cliente_id = ? "
+            "ORDER BY (r.nombre IS NULL), (s.zona IS NULL), s.created_at DESC, pa.id DESC LIMIT 1",
+            (p["id"],),
+        ).fetchone()
+        ultima_visita = db.execute(
+            "SELECT r.fecha FROM paradas pa JOIN rutas r ON r.id = pa.ruta_id "
+            "JOIN solicitudes s ON s.id = pa.solicitud_id "
+            "WHERE s.cliente_id = ? AND pa.estado != 'pendiente' ORDER BY r.fecha DESC LIMIT 1",
+            (p["id"],),
+        ).fetchone()
+        filas.append([
+            p["name"],
+            p["telefono"] or "—",
+            p["edad"] or "—",
+            "Máquina" if p["tipo_maquina"] == "maquina" else "Manual" if p["tipo_maquina"] else "—",
+            "Baxter" if p["marca"] == "baxter" else "Pisa" if p["marca"] else "—",
+            p["frecuencia_semana"] or "—",
+            CAUSA_ENFERMEDAD_LABELS.get(p["causa_enfermedad"], "—"),
+            (ruta_sol["direccion"] if ruta_sol else None) or "—",
+            (ruta_sol["ruta_nombre"] or ruta_sol["zona"]) if ruta_sol else "—",
+            "Compra" if (ruta_sol and ruta_sol["modalidad"]) == "compra"
+            else "Donación" if (ruta_sol and ruta_sol["modalidad"]) == "donacion" else "—",
+            ultima_visita["fecha"] if ultima_visita else "Aún no visitado",
+            round(p["material_recolectado_kg"] or 0, 1),
+            "Alta completa" if p["alta_completa"] else "Perfil sin alta" if p["perfil_completo"] else "Sin iniciar",
+        ])
+    wb = Workbook()
+    wb.remove(wb.active)
+    agregar_hoja_excel(
+        wb, "Pacientes",
+        ["Nombre", "WhatsApp", "Edad", "Tipo", "Marca", "Frecuencia/semana", "Causa", "Dirección",
+         "Zona/Ruta", "Modalidad", "Última visita", "Material recolectado (kg)", "Estado"],
+        filas,
+    )
+    return respuesta_excel(wb, f"pacientes_{date.today().isoformat()}.xlsx")
+
+
+@app.route("/admin/reportes/inventarios.xlsx")
+@login_required("admin")
+def admin_exportar_inventarios(user):
+    db = get_db()
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    existencia_botes = db.execute(
+        "SELECT COALESCE(SUM(CASE WHEN tipo IN ('compra','devolucion') THEN cantidad ELSE -cantidad END), 0) AS n "
+        "FROM inventario_botes"
+    ).fetchone()["n"]
+    existencia_por_caja = dict(db.execute(
+        "SELECT material, SUM(cantidad) AS n FROM inventario_cajas GROUP BY material"
+    ).fetchall())
+    filas_resumen = [["Botes", existencia_botes]]
+    filas_resumen += [[m, existencia_por_caja.get(m, 0) or 0] for m in TIPOS_CAJAS]
+    agregar_hoja_excel(wb, "Existencia actual", ["Tipo", "Existencia"], filas_resumen)
+
+    filas_botes = []
+    for m in db.execute("SELECT * FROM inventario_botes ORDER BY created_at DESC"):
+        filas_botes.append([m["created_at"], m["tipo"], m["cantidad"], m["notas"] or "—"])
+    agregar_hoja_excel(wb, "Movimientos de botes", ["Fecha", "Tipo de movimiento", "Cantidad", "Notas"], filas_botes)
+
+    filas_mov_cajas = []
+    for m in db.execute("SELECT * FROM inventario_cajas ORDER BY created_at DESC"):
+        filas_mov_cajas.append([m["created_at"], m["material"], m["tipo"], m["cantidad"], m["notas"] or "—"])
+    agregar_hoja_excel(
+        wb, "Movimientos de cajas", ["Fecha", "Material", "Tipo de movimiento", "Cantidad", "Notas"],
+        filas_mov_cajas,
+    )
+
+    filas_almacen = []
+    for m in db.execute("SELECT * FROM almacen_movimientos ORDER BY created_at DESC"):
+        filas_almacen.append([m["created_at"], m["tipo"], m["material"], m["cantidad"], m["motivo"] or "—"])
+    agregar_hoja_excel(
+        wb, "Almacén producto terminado", ["Fecha", "Tipo", "Material", "Cantidad", "Motivo"], filas_almacen
+    )
+
+    return respuesta_excel(wb, f"inventarios_{date.today().isoformat()}.xlsx")
+
+
+@app.route("/admin/reportes/productividad.xlsx")
+@login_required("admin")
+def admin_exportar_productividad(user):
+    db = get_db()
+    filas = []
+    for r in db.execute("SELECT * FROM productividad ORDER BY fecha DESC, created_at DESC"):
+        filas.append([
+            r["fecha"], r["persona"], ACTIVIDADES_PRODUCTIVIDAD_LABELS.get(r["actividad"], r["actividad"]),
+            r["cantidad_kg"] or 0, r["notas"] or "—",
+        ])
+    wb = Workbook()
+    wb.remove(wb.active)
+    agregar_hoja_excel(wb, "Productividad", ["Fecha", "Persona", "Actividad", "Kg", "Notas"], filas)
+    return respuesta_excel(wb, f"productividad_{date.today().isoformat()}.xlsx")
+
+
+@app.route("/admin/reportes/rutas-finalizadas.xlsx")
+@login_required("admin")
+def admin_exportar_rutas_finalizadas(user):
+    db = get_db()
+    rutas = db.execute(
+        "SELECT r.*, u.name AS recolector_nombre FROM rutas r LEFT JOIN users u ON u.id = r.recolector_id "
+        "WHERE r.estado = 'completada' ORDER BY r.fecha DESC"
+    ).fetchall()
+    filas = []
+    for r in rutas:
+        total_paradas = db.execute(
+            "SELECT COUNT(*) AS n FROM paradas WHERE ruta_id = ?", (r["id"],)
+        ).fetchone()["n"]
+        kg_total = db.execute(
+            "SELECT COALESCE(SUM(kg_recolectados), 0) AS kg FROM paradas WHERE ruta_id = ?", (r["id"],)
+        ).fetchone()["kg"]
+        tiempo_real = "—"
+        if r["hora_inicio_real"] and r["hora_fin_real"]:
+            try:
+                inicio = datetime.strptime(r["hora_inicio_real"], "%Y-%m-%d %H:%M:%S")
+                fin = datetime.strptime(r["hora_fin_real"], "%Y-%m-%d %H:%M:%S")
+                tiempo_real = formatear_duracion((fin - inicio).total_seconds() / 60)
+            except ValueError:
+                tiempo_real = "—"
+        filas.append([
+            r["nombre"], r["fecha"], r["recolector_nombre"] or "sin asignar", total_paradas,
+            tiempo_real, round(kg_total or 0, 1),
+        ])
+    wb = Workbook()
+    wb.remove(wb.active)
+    agregar_hoja_excel(
+        wb, "Rutas finalizadas",
+        ["Nombre", "Fecha", "Recolector", "Paradas", "Tiempo real", "Kg recolectados"], filas,
+    )
+    return respuesta_excel(wb, f"rutas_finalizadas_{date.today().isoformat()}.xlsx")
+
+
+@app.route("/admin/reportes/material-recolectado.xlsx")
+@login_required("admin")
+def admin_exportar_material_recolectado(user):
+    db = get_db()
+    filas = []
+    total_general = 0
+    for p in db.execute(
+        "SELECT name, telefono, material_recolectado_kg FROM users WHERE role = 'cliente' "
+        "AND material_recolectado_kg > 0 ORDER BY material_recolectado_kg DESC"
+    ):
+        filas.append([p["name"], p["telefono"] or "—", round(p["material_recolectado_kg"], 1)])
+        total_general += p["material_recolectado_kg"]
+    filas.append(["", "", ""])
+    filas.append(["Total general", "", round(total_general, 1)])
+    wb = Workbook()
+    wb.remove(wb.active)
+    agregar_hoja_excel(wb, "Material recolectado", ["Paciente", "WhatsApp", "Kg recolectados"], filas)
+    return respuesta_excel(wb, f"material_recolectado_{date.today().isoformat()}.xlsx")
+
+
+@app.route("/admin/reportes/cajas-entregadas.xlsx")
+@login_required("admin")
+def admin_exportar_cajas_entregadas(user):
+    db = get_db()
+    filas = []
+    rows = db.execute(
+        "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre FROM solicitudes s "
+        "LEFT JOIN users u ON u.id = s.cliente_id "
+        "WHERE s.tipo_redistribucion IN ('donar', 'material') AND s.cantidad_cajas IS NOT NULL "
+        "ORDER BY s.created_at DESC"
+    ).fetchall()
+    for s in rows:
+        filas.append([
+            s["cliente_nombre"] or "—",
+            s["material"],
+            s["cantidad_cajas"],
+            "Donar" if s["tipo_redistribucion"] == "donar" else "Recibir",
+            "Recoger en RE-PVC" if s["recoger_en_sitio"] else "Por ruta",
+            ESTADO_LABELS.get(s["estado"], s["estado"]),
+            s["created_at"],
+        ])
+    wb = Workbook()
+    wb.remove(wb.active)
+    agregar_hoja_excel(
+        wb, "Cajas",
+        ["Paciente", "Material", "Cantidad", "Donar/Recibir", "Modalidad", "Estado", "Fecha de solicitud"],
+        filas,
+    )
+    return respuesta_excel(wb, f"cajas_entregadas_{date.today().isoformat()}.xlsx")
 
 
 # ---------- Recolector ----------
