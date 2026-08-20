@@ -9,7 +9,7 @@
 {% set pct = ((r['paradas_hechas'] / r['total_paradas'] * 100) | round | int) if r['total_paradas'] else 0 %}
 <div class="ruta-hoy">
   <div class="ruta-hoy-top">
-    <strong>{{ r['nombre'] }}</strong>
+    <a href="{{ url_for('admin_ver_ruta', ruta_id=r['id']) }}" style="font-weight:700; color:inherit; text-decoration:none;">{{ r['nombre'] }} →</a>
     <span class="badge {{ r['estado'] }}">{{ r['estado'] }}</span>
   </div>
   <div style="color:var(--muted); font-size:0.88rem; margin-top:4px;">
