@@ -551,15 +551,19 @@
       Cupo: <strong>{{ pacientes_activos }}/{{ max_pacientes_activos }}</strong> pacientes activos.
     </p>
     {% if pacientes %}
-    <div style="display:flex; justify-content:flex-end; gap:6px; margin-bottom:6px;">
-      <button type="button" class="small secondary" id="btn-pacientes-izq">&larr;</button>
-      <button type="button" class="small secondary" id="btn-pacientes-der">&rarr;</button>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap;">
+      <input type="text" id="buscar-pacientes" placeholder="Buscar por nombre, teléfono o ruta..." autocomplete="off" style="flex:1; min-width:220px; max-width:340px;">
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="small secondary" id="btn-pacientes-izq">&larr;</button>
+        <button type="button" class="small secondary" id="btn-pacientes-der">&rarr;</button>
+      </div>
     </div>
+    <p id="pacientes-sin-resultados" class="empty" style="display:none;">Ningún paciente coincide con la búsqueda.</p>
     <div id="tabla-pacientes" class="table-scroll">
     <table>
       <tr><th>Nombre</th><th>WhatsApp (cuenta)</th><th>Teléfono (entrega)</th><th>Edad</th><th>Tipo</th><th>Marca</th><th>Frecuencia/semana</th><th>Causa</th><th>Dirección</th><th>Ruta</th><th>Modalidad</th><th>Última visita</th><th>Material recolectado</th><th>Estado</th><th>Bote</th><th></th></tr>
       {% for p in pacientes %}
-      <tr>
+      <tr data-buscar="{{ (p['name'] ~ ' ' ~ (p['telefono'] or '') ~ ' ' ~ (p['telefono_actual'] or '') ~ ' ' ~ (p['ruta_actual'] or '')) | lower }}">
         <td>{{ p['name'] }}{% if p['modalidad_actual'] == 'compra' %} 💲{% endif %}</td>
         <td>{{ ('+52 ' + p['telefono']) if p['telefono'] else '—' }}</td>
         <td>{{ p['telefono_actual'] or '—' }}</td>
@@ -1655,6 +1659,21 @@ const btnPacientesDer = document.getElementById('btn-pacientes-der');
 if (btnPacientesIzq) {
   btnPacientesIzq.addEventListener('click', () => document.getElementById('tabla-pacientes').scrollBy({left: -300, behavior: 'smooth'}));
   btnPacientesDer.addEventListener('click', () => document.getElementById('tabla-pacientes').scrollBy({left: 300, behavior: 'smooth'}));
+}
+
+const buscarPacientes = document.getElementById('buscar-pacientes');
+if (buscarPacientes) {
+  buscarPacientes.addEventListener('input', () => {
+    const q = buscarPacientes.value.trim().toLowerCase();
+    const filas = document.querySelectorAll('#tabla-pacientes tr[data-buscar]');
+    let visibles = 0;
+    filas.forEach((fila) => {
+      const coincide = !q || fila.dataset.buscar.indexOf(q) !== -1;
+      fila.style.display = coincide ? '' : 'none';
+      if (coincide) visibles++;
+    });
+    document.getElementById('pacientes-sin-resultados').style.display = visibles === 0 ? 'block' : 'none';
+  });
 }
 
 function activarDropzoneVideo(dropzoneId, textoId, archivoId, inputId) {
