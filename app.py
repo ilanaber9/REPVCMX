@@ -2584,7 +2584,7 @@ def admin_dashboard(user):
     for p in pacientes_rows:
         paciente = dict(p)
         ruta_sol = db.execute(
-            "SELECT s.id AS solicitud_id, s.zona, s.direccion, s.telefono, s.modalidad, "
+            "SELECT s.id AS solicitud_id, s.zona, s.direccion, s.telefono, s.modalidad, s.estado, "
             "s.bote_a_devolver, r.nombre AS ruta_nombre FROM solicitudes s "
             "LEFT JOIN paradas pa ON pa.solicitud_id = s.id "
             "LEFT JOIN rutas r ON r.id = pa.ruta_id "
@@ -2598,6 +2598,7 @@ def admin_dashboard(user):
         paciente["modalidad_actual"] = ruta_sol["modalidad"] if ruta_sol else None
         paciente["solicitud_id_actual"] = ruta_sol["solicitud_id"] if ruta_sol else None
         paciente["bote_a_devolver"] = ruta_sol["bote_a_devolver"] if ruta_sol else False
+        paciente["espera_entrega_bote"] = (ruta_sol["estado"] == "pendiente_entrega") if ruta_sol else False
         ultima_visita = db.execute(
             "SELECT r.fecha FROM paradas p "
             "JOIN rutas r ON r.id = p.ruta_id JOIN solicitudes s ON s.id = p.solicitud_id "
@@ -3284,6 +3285,27 @@ def admin_marcar_bote_devolver(user, solicitud_id):
     db.commit()
     nombre = sol["nombre_contacto"] or sol["direccion"]
     flash(f"Se marcó que '{nombre}' debe regresar el bote — aparecerá en su próxima ruta.", "success")
+    return redirect(url_for("admin_dashboard", tab="pacientes"))
+
+
+@app.route("/admin/solicitudes/<int:solicitud_id>/ya-tiene-bote", methods=["POST"])
+@login_required("admin")
+def admin_cancelar_entrega_bote(user, solicitud_id):
+    """Para pacientes migrados de un programa anterior que ya tienen su bote en casa — al darlos
+    de alta, el sistema los marca 'pendiente_entrega' como a cualquier paciente nuevo (asumiendo
+    que hay que entregarles uno). Este botón lo salta: pasa directo a 'pendiente', listo para
+    programarse en una recolección normal, sin esperar una entrega que no hace falta."""
+    db = get_db()
+    sol = db.execute(
+        "SELECT * FROM solicitudes WHERE id = ? AND estado = 'pendiente_entrega'", (solicitud_id,)
+    ).fetchone()
+    if sol is None:
+        flash("Esa solicitud ya no está esperando entrega de bote (puede que ya se haya programado o resuelto).", "error")
+        return redirect(url_for("admin_dashboard", tab="pacientes"))
+    db.execute("UPDATE solicitudes SET estado = 'pendiente' WHERE id = ?", (solicitud_id,))
+    db.commit()
+    nombre = sol["nombre_contacto"] or sol["direccion"]
+    flash(f"'{nombre}' ya no espera entrega de bote — queda listo para programarse en una recolección normal.", "success")
     return redirect(url_for("admin_dashboard", tab="pacientes"))
 
 

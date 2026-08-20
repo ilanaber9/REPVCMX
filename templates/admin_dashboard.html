@@ -603,7 +603,14 @@
         </td>
         <td>
           {% if p['solicitud_id_actual'] %}
-            {% if p['bote_a_devolver'] %}
+            {% if p['espera_entrega_bote'] %}
+            <span class="badge pendiente_entrega">Espera entrega</span>
+            <form method="post" action="{{ url_for('admin_cancelar_entrega_bote', solicitud_id=p['solicitud_id_actual']) }}"
+                  onsubmit="return confirm('¿\'{{ p['name'] }}\' ya tiene su bote (paciente migrado de otro programa)? Se cancela la entrega programada y queda listo para recolección normal.');"
+                  style="margin-top:4px;">
+              <button type="submit" class="small secondary">Ya tiene bote</button>
+            </form>
+            {% elif p['bote_a_devolver'] %}
             <span class="badge incidencia">Por regresar</span>
             {% else %}
             <form method="post" action="{{ url_for('admin_marcar_bote_devolver', solicitud_id=p['solicitud_id_actual']) }}"
