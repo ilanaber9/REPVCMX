@@ -2433,10 +2433,8 @@ def admin_dashboard(user):
         "FROM users u LEFT JOIN horas_extra h ON h.recolector_id = u.id "
         "WHERE u.role = 'recolector' GROUP BY u.id ORDER BY u.name"
     ).fetchall()
-    hoy = date.today().isoformat()
     rutas_activas = [r for r in rutas if r["estado"] != "completada"]
     rutas_finalizadas = [r for r in rutas if r["estado"] == "completada"]
-    rutas_hoy = [r for r in rutas_activas if r["fecha"] == hoy]
 
     notificaciones = db.execute(
         "SELECT * FROM notificaciones_admin ORDER BY leida, created_at DESC"
@@ -2655,8 +2653,6 @@ def admin_dashboard(user):
         puntos_zona=puntos_zona,
         rutas=rutas_activas,
         rutas_finalizadas=rutas_finalizadas,
-        rutas_hoy=rutas_hoy,
-        hoy=hoy,
         recolectores=recolectores,
         cuentas_nef=cuentas_nef,
         cuentas_admin_general=cuentas_admin_general,
@@ -2903,66 +2899,6 @@ def admin_zona_mapa(user, zona):
     return render_template(
         "admin_zona_mapa.html", zona=zona, puntos=puntos, puntos_json=puntos_json, estimado=estimado
     )
-
-
-@app.route("/admin/rutas/nueva", methods=["POST"])
-@login_required("admin")
-def admin_nueva_ruta(user):
-    nombre = request.form["nombre"].strip()
-    fecha = request.form.get("fecha") or date.today().isoformat()
-    hora_salida = request.form.get("hora_salida") or "08:00"
-    recolector_id = request.form.get("recolector_id") or None
-    solicitud_ids = request.form.getlist("solicitud_ids")
-
-    if not recolector_id:
-        flash("Debes asignar un recolector para poder programar la ruta.", "error")
-        return redirect(url_for("admin_dashboard", tab="solicitudes"))
-
-    db = get_db()
-    zona = None
-    if solicitud_ids:
-        fila = db.execute(
-            "SELECT zona FROM solicitudes WHERE id = ? AND zona IS NOT NULL", (solicitud_ids[0],)
-        ).fetchone()
-        zona = fila["zona"] if fila else None
-    cur = db.execute(
-        "INSERT INTO rutas (nombre, zona, fecha, hora_salida, recolector_id) VALUES (?, ?, ?, ?, ?)",
-        (nombre, zona, fecha, hora_salida, recolector_id),
-    )
-    ruta_id = cur.lastrowid
-    puntos_raw = [
-        db.execute(
-            "SELECT id, estado, lat, lon, cliente_id, direccion FROM solicitudes WHERE id = ?", (sid,)
-        ).fetchone()
-        for sid in solicitud_ids
-    ]
-    puntos_fusionados = fusionar_puntos_mismo_cliente([p for p in puntos_raw if p is not None])
-    puntos, sobrantes_cajas = limitar_cajas_grupo(db, puntos_fusionados)
-    parada_ids_nuevas = []
-    for i, p in enumerate(puntos, start=1):
-        cur_parada = db.execute(
-            "INSERT INTO paradas (ruta_id, solicitud_id, solicitud_extra_id, tipo_extra, orden, tipo) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (ruta_id, p["id"], p.get("extra_id"), p.get("tipo_extra"), i, p["tipo"]),
-        )
-        parada_ids_nuevas.append(cur_parada.lastrowid)
-        db.execute("UPDATE solicitudes SET estado = 'programada' WHERE id = ?", (p["id"],))
-        if p.get("extra_id"):
-            db.execute("UPDATE solicitudes SET estado = 'programada' WHERE id = ?", (p["extra_id"],))
-    db.commit()
-    if parada_ids_nuevas:
-        threading.Thread(
-            target=_notificar_paradas_programadas, args=(parada_ids_nuevas,), daemon=True
-        ).start()
-    mensaje = f"Ruta '{nombre}' creada con {len(puntos)} parada(s)."
-    if sobrantes_cajas:
-        mensaje += (
-            f" {len(sobrantes_cajas)} solicitud(es) no se incluyeron por exceder el máximo de "
-            f"{CAJAS_MAX_ENTREGA_RUTA} cajas de entrega o {CAJAS_MAX_RECEPCION_RUTA} de recepción por ruta; "
-            "quedaron pendientes para otra ruta."
-        )
-    flash(mensaje, "success" if not sobrantes_cajas else "error")
-    return redirect(url_for("admin_dashboard", tab="rutas"))
 
 
 @app.route("/admin/rutas/<int:ruta_id>/eliminar", methods=["POST"])
@@ -3651,10 +3587,126 @@ def admin_ver_ruta(user, ruta_id):
     kg_total = db.execute(
         "SELECT COALESCE(SUM(kg_recolectados), 0) AS kg FROM paradas WHERE ruta_id = ?", (ruta_id,)
     ).fetchone()["kg"]
+
+    candidatos = []
+    aviso_exceso = None
+    if ruta["estado"] != "completada" and ruta["zona"]:
+        ids_en_ruta = set()
+        for p in paradas:
+            ids_en_ruta.add(p["solicitud_id"])
+            if p["solicitud_extra_id"]:
+                ids_en_ruta.add(p["solicitud_extra_id"])
+        candidatos = db.execute(
+            "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion "
+            "FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
+            "WHERE s.zona = ? AND s.estado IN ('pendiente', 'pendiente_entrega') "
+            f"AND {condicion_lista_para_recoleccion('s')} ORDER BY s.created_at",
+            (ruta["zona"],),
+        ).fetchall()
+        candidatos = [c for c in candidatos if c["id"] not in ids_en_ruta]
+
+        confirmar_id = request.args.get("confirmar_agregar", type=int)
+        if confirmar_id:
+            candidato_preview = next((c for c in candidatos if c["id"] == confirmar_id), None)
+            if candidato_preview:
+                sol_preview = db.execute(
+                    "SELECT lat, lon FROM solicitudes WHERE id = ?", (confirmar_id,)
+                ).fetchone()
+                puntos_prueba = [dict(p) for p in paradas] + [dict(sol_preview)]
+                estimado_prueba = estimar_ruta(puntos_prueba)
+                aviso_exceso = {
+                    "solicitud_id": confirmar_id, "nombre": candidato_preview["nombre"],
+                    "duracion": estimado_prueba["duracion"] if estimado_prueba else "desconocida",
+                }
+
     return render_template(
         "admin_ruta.html", ruta=ruta, paradas=paradas, paradas_json=paradas_json, estimado=estimado,
-        tiempo_real=tiempo_real, kg_total=kg_total,
+        tiempo_real=tiempo_real, kg_total=kg_total, candidatos=candidatos, aviso_exceso=aviso_exceso,
     )
+
+
+@app.route("/admin/rutas/<int:ruta_id>/agregar-paciente", methods=["POST"])
+@login_required("admin")
+def admin_agregar_paciente_ruta(user, ruta_id):
+    db = get_db()
+    ruta = db.execute("SELECT * FROM rutas WHERE id = ?", (ruta_id,)).fetchone()
+    if ruta is None:
+        flash("Esa ruta ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="rutas"))
+    if ruta["estado"] == "completada":
+        flash("Esta ruta ya se completó, no se puede modificar.", "error")
+        return redirect(url_for("admin_ver_ruta", ruta_id=ruta_id))
+
+    solicitud_id = request.form.get("solicitud_id", type=int)
+    confirmar_exceso = request.form.get("confirmar_exceso") == "1"
+    candidato = db.execute(
+        "SELECT * FROM solicitudes WHERE id = ? AND estado IN ('pendiente', 'pendiente_entrega')",
+        (solicitud_id,),
+    ).fetchone()
+    if candidato is None:
+        flash("Selecciona un paciente pendiente válido.", "error")
+        return redirect(url_for("admin_ver_ruta", ruta_id=ruta_id))
+
+    paradas_actuales = db.execute(
+        "SELECT s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id WHERE p.ruta_id = ?",
+        (ruta_id,),
+    ).fetchall()
+    puntos_prueba = [dict(p) for p in paradas_actuales] + [{"lat": candidato["lat"], "lon": candidato["lon"]}]
+    estimado_prueba = estimar_ruta(puntos_prueba)
+    if estimado_prueba and estimado_prueba["minutos"] > DURACION_MAXIMA_RUTA_MIN and not confirmar_exceso:
+        flash(
+            f"Agregar a este paciente deja la ruta en {estimado_prueba['duracion']}, por encima del límite de "
+            f"{formatear_duracion(DURACION_MAXIMA_RUTA_MIN)}. Confirma si quieres agregarlo de todas formas.",
+            "error",
+        )
+        return redirect(url_for("admin_ver_ruta", ruta_id=ruta_id, confirmar_agregar=solicitud_id))
+
+    tipo_nuevo = "entrega" if candidato["estado"] == "pendiente_entrega" else "recoleccion"
+    no_arranco = ruta["estado"] == "planificada" and ruta["hora_inicio_real"] is None
+    if no_arranco:
+        # La ruta no ha salido: mete la parada nueva y reacomoda todo el recorrido por cercanía
+        # real, para que quede en la posición que le toca en vez de siempre al final.
+        db.execute(
+            "INSERT INTO paradas (ruta_id, solicitud_id, orden, tipo) VALUES (?, ?, 0, ?)",
+            (ruta_id, candidato["id"], tipo_nuevo),
+        )
+        todas = [dict(p) for p in db.execute(
+            "SELECT p.id AS parada_id, s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+            "WHERE p.ruta_id = ?",
+            (ruta_id,),
+        ).fetchall()]
+        todas_ordenadas = ordenar_por_cercania(todas)
+        for i, p in enumerate(todas_ordenadas, start=1):
+            db.execute("UPDATE paradas SET orden = ? WHERE id = ?", (i, p["parada_id"]))
+    else:
+        # La ruta ya va en curso: se agrega al final para no reordenar paradas ya resueltas.
+        siguiente_orden = db.execute(
+            "SELECT COALESCE(MAX(orden), 0) + 1 AS n FROM paradas WHERE ruta_id = ?", (ruta_id,)
+        ).fetchone()["n"]
+        db.execute(
+            "INSERT INTO paradas (ruta_id, solicitud_id, orden, tipo) VALUES (?, ?, ?, ?)",
+            (ruta_id, candidato["id"], siguiente_orden, tipo_nuevo),
+        )
+    db.execute("UPDATE solicitudes SET estado = 'programada' WHERE id = ?", (candidato["id"],))
+    db.commit()
+
+    nombre = candidato["nombre_contacto"]
+    telefono = None
+    if candidato["cliente_id"]:
+        u = db.execute("SELECT name, telefono FROM users WHERE id = ?", (candidato["cliente_id"],)).fetchone()
+        if u:
+            nombre = u["name"]
+            telefono = u["telefono"]
+    if telefono:
+        parada_nueva = db.execute(
+            "SELECT id FROM paradas WHERE ruta_id = ? AND solicitud_id = ?", (ruta_id, candidato["id"])
+        ).fetchone()
+        threading.Thread(
+            target=_notificar_paradas_programadas, args=([parada_nueva["id"]],), daemon=True
+        ).start()
+
+    flash(f"Se agregó a '{nombre}' a la ruta.", "success")
+    return redirect(url_for("admin_ver_ruta", ruta_id=ruta_id))
 
 
 @app.route("/admin/administradores/nuevo", methods=["POST"])

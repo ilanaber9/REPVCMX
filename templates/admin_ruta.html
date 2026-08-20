@@ -33,6 +33,39 @@
   {% endif %}
 </div>
 
+{% if ruta['estado'] != 'completada' %}
+<div class="card">
+  <h2>Agregar paciente a esta ruta</h2>
+  {% if aviso_exceso %}
+  <div class="note" style="background:var(--surface-2); border-radius:8px; padding:10px 12px; margin-bottom:12px;">
+    Agregar a <strong>{{ aviso_exceso['nombre'] }}</strong> deja la ruta en <strong>{{ aviso_exceso['duracion'] }}</strong>,
+    por encima del límite de 7:30. ¿Quieres agregarlo de todas formas?
+    <form method="post" action="{{ url_for('admin_agregar_paciente_ruta', ruta_id=ruta['id']) }}" style="margin-top:8px;">
+      <input type="hidden" name="solicitud_id" value="{{ aviso_exceso['solicitud_id'] }}">
+      <input type="hidden" name="confirmar_exceso" value="1">
+      <button type="submit" class="small danger">Sí, agregar de todas formas</button>
+    </form>
+  </div>
+  {% endif %}
+  {% if candidatos %}
+  <form method="post" action="{{ url_for('admin_agregar_paciente_ruta', ruta_id=ruta['id']) }}" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+    <div style="flex:1; min-width:220px;">
+      <label>Paciente pendiente en {{ ruta['zona'] }}</label>
+      <select name="solicitud_id" required>
+        <option value="" disabled selected>Selecciona un paciente</option>
+        {% for c in candidatos %}
+        <option value="{{ c['id'] }}">{{ c['nombre'] }} — {{ c['direccion'] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit">Agregar a la ruta</button>
+  </form>
+  {% else %}
+  <p class="empty">No hay pacientes pendientes en la zona "{{ ruta['zona'] or 'sin asignar' }}" para agregar.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Mapa de la ruta</h2>
   <div id="mapa" style="height:380px; border-radius:8px;"></div>

@@ -24,7 +24,7 @@
   </div>
   <div class="progress-track"><div class="progress-fill" style="width:{{ pct }}%;"></div></div>
   <div style="display:flex; gap:8px; margin-top:10px;">
-    <a class="btn secondary small" href="{{ url_for('admin_ver_ruta', ruta_id=r['id']) }}">Ver detalle</a>
+    <a class="btn secondary small" href="{{ url_for('admin_ver_ruta', ruta_id=r['id']) }}">Agregar o eliminar paciente</a>
     <form class="inline" method="post" action="{{ url_for('admin_eliminar_ruta', ruta_id=r['id']) }}"
           onsubmit="return confirm('¿Eliminar la ruta \'{{ r['nombre'] }}\' de la planeación? Las paradas aún no atendidas volverán a quedar pendientes.');">
       <button class="small danger" type="submit">Eliminar</button>
@@ -55,7 +55,7 @@
 
 <div class="tabs">
   <button type="button" class="tab-btn" data-tab="pacientes">Pacientes{% if lista_espera %} ({{ lista_espera|length }} en espera){% endif %}</button>
-  <button type="button" class="tab-btn" data-tab="rutas">Rutas</button>
+  <button type="button" class="tab-btn" data-tab="rutas">Programación de ruta</button>
   <button type="button" class="tab-btn" data-tab="solicitudes">Solicitudes pendientes</button>
   <button type="button" class="tab-btn" data-tab="auditoria">Auditoría de rutas{% if total_auditoria_rutas %} ({{ total_auditoria_rutas }}){% endif %}</button>
   <button type="button" class="tab-btn" data-tab="paciente">Agregar paciente</button>
@@ -77,53 +77,22 @@
 <div class="tab-panel" data-tab="rutas">
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-      <h1 style="margin:0;">Rutas de hoy ({{ hoy }})</h1>
+      <h1 style="margin:0;">Rutas pendientes</h1>
       <div style="display:flex; gap:8px;">
         <a class="btn secondary small" href="{{ url_for('admin_rutas_masivas') }}">Crear rutas por zona</a>
         <a class="btn secondary small" href="{{ url_for('admin_mapa') }}">Ver mapa completo</a>
       </div>
     </div>
-    {% if rutas_hoy %}
-    {% for r in rutas_hoy %}
-    {{ ruta_card(r) }}
-    {% endfor %}
-    {% else %}
-    <p class="empty">No hay rutas programadas para hoy.</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <h2 style="margin:0;">Todas las rutas</h2>
+    <p style="color:var(--muted); font-size:0.85rem;">
+      Rutas ya programadas que todavía no se completan. Usa "Agregar o eliminar paciente" en cualquiera
+      para ajustarla a mano.
+    </p>
     {% if rutas %}
     {% for r in rutas %}
     {{ ruta_card(r) }}
     {% endfor %}
     {% else %}
-    <p class="empty">Aún no hay rutas creadas.</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <h2 style="margin:0;">Crear ruta con lo seleccionado</h2>
-    <p style="color:var(--muted); font-size:0.85rem;">
-      Marca solicitudes en la pestaña "Solicitudes pendientes" y arma la ruta con esos datos aquí.
-    </p>
-    <label>Nombre de la ruta</label>
-    <input type="text" name="nombre" placeholder="Ruta Zona Norte" form="form-crear-ruta-manual" required>
-    <label>Fecha</label>
-    <input type="date" name="fecha" form="form-crear-ruta-manual" required>
-    <label>Hora de salida (para avisarle a los pacientes)</label>
-    <input type="time" name="hora_salida" value="08:00" form="form-crear-ruta-manual" required style="max-width:150px;">
-    <label>Recolector asignado</label>
-    <select name="recolector_id" form="form-crear-ruta-manual" required>
-      <option value="" disabled selected>Selecciona un recolector</option>
-      {% for r in recolectores %}
-      <option value="{{ r['id'] }}">{{ r['name'] }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit" form="form-crear-ruta-manual">Crear ruta</button>
-    {% if not recolectores %}
-    <p class="empty">Primero crea al menos un recolector en la pestaña "Alta y baja de cuentas".</p>
+    <p class="empty">No hay rutas pendientes — créalas desde "Crear rutas por zona".</p>
     {% endif %}
   </div>
 
@@ -143,67 +112,62 @@
 <div class="tab-panel" data-tab="solicitudes">
   <div class="card">
     <h1 style="margin:0;">Solicitudes pendientes</h1>
+    <p style="color:var(--muted); font-size:0.85rem;">
+      Para programarlas en una ruta, ve a "Programación de ruta" → "Crear rutas por zona".
+    </p>
 
-    <form method="post" action="{{ url_for('admin_nueva_ruta') }}" id="form-crear-ruta-manual">
-      <h2 style="margin-top:20px;">Solicitudes de clientes</h2>
-      {% if pendientes %}
-      <table>
-        <tr><th></th><th>Cliente</th><th>Dirección</th><th>Solicitud</th><th>Material</th><th>Cajas</th><th>Notas</th></tr>
-        {% for s in pendientes %}
-        <tr>
-          <td><input type="checkbox" name="solicitud_ids" value="{{ s['id'] }}"></td>
-          <td>{{ s['cliente_nombre'] }}</td>
-          <td>{{ s['direccion'] }}</td>
-          <td>
-            {% if s['tipo_redistribucion'] == 'donar' %}<span class="badge programada">Donar</span>
-            {% elif s['tipo_redistribucion'] == 'material' %}<span class="badge pendiente_entrega">Recibir</span>
-            {% else %}—{% endif %}
-          </td>
-          <td>{{ s['material'] if s['material'] != 'PVC' else '—' }}</td>
-          <td>{{ s['cantidad_cajas'] or '—' }}</td>
-          <td>{{ s['notas'] or '—' }}</td>
-        </tr>
-        {% endfor %}
-      </table>
-      {% else %}
-      <p class="empty">No hay solicitudes de clientes pendientes.</p>
-      {% endif %}
+    <h2 style="margin-top:20px;">Solicitudes de clientes</h2>
+    {% if pendientes %}
+    <table>
+      <tr><th>Cliente</th><th>Dirección</th><th>Solicitud</th><th>Material</th><th>Cajas</th><th>Notas</th></tr>
+      {% for s in pendientes %}
+      <tr>
+        <td>{{ s['cliente_nombre'] }}</td>
+        <td>{{ s['direccion'] }}</td>
+        <td>
+          {% if s['tipo_redistribucion'] == 'donar' %}<span class="badge programada">Donar</span>
+          {% elif s['tipo_redistribucion'] == 'material' %}<span class="badge pendiente_entrega">Recibir</span>
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ s['material'] if s['material'] != 'PVC' else '—' }}</td>
+        <td>{{ s['cantidad_cajas'] or '—' }}</td>
+        <td>{{ s['notas'] or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No hay solicitudes de clientes pendientes.</p>
+    {% endif %}
 
-      <h2 style="margin-top:24px;">Pendientes de entrega (botes / material)</h2>
-      {% if pendientes_entrega %}
-      <table>
-        <tr><th></th><th>Paciente</th><th>Dirección</th><th>Solicitud</th><th>Modalidad</th><th>Ruta</th><th></th></tr>
-        {% for s in pendientes_entrega %}
-        <tr>
-          <td>{% if not s['ruta_programada'] %}<input type="checkbox" name="solicitud_ids" value="{{ s['id'] }}">{% endif %}</td>
-          <td>{{ s['cliente_nombre'] }}</td>
-          <td>{{ s['direccion'] }}</td>
-          <td>
-            {% if s['tipo_redistribucion'] == 'material' %}<span class="badge pendiente_entrega">Recibir cajas</span>
-            {% else %}<span class="badge programada">Bote nuevo</span>{% endif %}
-          </td>
-          <td>{{ 'Compra' if s['modalidad'] == 'compra' else 'Donación' if s['modalidad'] == 'donacion' else '—' }}</td>
-          <td>{{ s['zona'] or 'Sin asignar' }}</td>
-          <td>
-            {% if s['ruta_programada'] %}
-            <span class="badge pendiente">En ruta "{{ s['ruta_programada'] }}" — falta que el recolector confirme la entrega</span>
-            {% else %}
-            <button type="submit" class="small secondary" formnovalidate
-                    formaction="{{ url_for('admin_marcar_bote_entregado', solicitud_id=s['id']) }}" formmethod="post">
-              Marcar bote entregado
-            </button>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
-      {% else %}
-      <p class="empty">No hay pacientes esperando entrega.</p>
-      {% endif %}
-      <p style="color:var(--muted); font-size:0.85rem; margin-top:10px;">
-        Marca lo que quieras incluir y ve a la pestaña "Rutas" para crear la ruta con lo seleccionado.
-      </p>
-    </form>
+    <h2 style="margin-top:24px;">Pendientes de entrega (botes / material)</h2>
+    {% if pendientes_entrega %}
+    <table>
+      <tr><th>Paciente</th><th>Dirección</th><th>Solicitud</th><th>Modalidad</th><th>Ruta</th><th></th></tr>
+      {% for s in pendientes_entrega %}
+      <tr>
+        <td>{{ s['cliente_nombre'] }}</td>
+        <td>{{ s['direccion'] }}</td>
+        <td>
+          {% if s['tipo_redistribucion'] == 'material' %}<span class="badge pendiente_entrega">Recibir cajas</span>
+          {% else %}<span class="badge programada">Bote nuevo</span>{% endif %}
+        </td>
+        <td>{{ 'Compra' if s['modalidad'] == 'compra' else 'Donación' if s['modalidad'] == 'donacion' else '—' }}</td>
+        <td>{{ s['zona'] or 'Sin asignar' }}</td>
+        <td>
+          {% if s['ruta_programada'] %}
+          <span class="badge pendiente">En ruta "{{ s['ruta_programada'] }}" — falta que el recolector confirme la entrega</span>
+          {% else %}
+          <form method="post" action="{{ url_for('admin_marcar_bote_entregado', solicitud_id=s['id']) }}">
+            <button type="submit" class="small secondary">Marcar bote entregado</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">No hay pacientes esperando entrega.</p>
+    {% endif %}
   </div>
 
 </div>
