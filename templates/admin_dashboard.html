@@ -205,6 +205,31 @@
         <button type="submit" class="danger">Eliminar pacientes de prueba</button>
       </form>
     </div>
+    {% if pacientes_prueba %}
+    <p style="color:var(--muted); font-size:0.85rem; margin-top:14px;">
+      Hay <strong>{{ pacientes_prueba|length }}</strong> paciente(s) de prueba activos ahora mismo. No
+      aparecen en "Pacientes" (esa pestaña es solo para cuentas reales) — para usarlos, ve a
+      "Programación de ruta" → "Crear rutas por zona", ahí sí aparecen agrupados por zona listos para
+      programar una ruta con ellos, igual que con pacientes reales.
+    </p>
+    <div class="table-scroll" style="margin-top:10px; max-height:320px; overflow-y:auto;">
+    <table style="min-width:auto;">
+      <tr><th>Nombre</th><th>Dirección</th><th>Zona</th><th>Estado</th></tr>
+      {% for p in pacientes_prueba %}
+      <tr>
+        <td>{{ p['nombre_contacto'] }}</td>
+        <td>{{ p['direccion'] }}</td>
+        <td>{{ p['zona'] }}</td>
+        <td><span class="badge {{ p['estado'] }}">{{ ESTADO_LABELS.get(p['estado'], p['estado']) }}</span></td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+    {% else %}
+    <p style="color:var(--muted); font-size:0.85rem; margin-top:10px;">
+      No hay pacientes de prueba activos ahora mismo.
+    </p>
+    {% endif %}
   </div>
   {% endif %}
 

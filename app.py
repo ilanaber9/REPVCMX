@@ -2820,6 +2820,11 @@ def admin_dashboard(user):
         len(auditoria_sin_zona) + len(auditoria_sin_coordenadas) + len(auditoria_programada_sin_ruta)
     )
 
+    pacientes_prueba = db.execute(
+        "SELECT id, nombre_contacto, direccion, zona, estado FROM solicitudes "
+        "WHERE nombre_contacto LIKE 'Prueba %' ORDER BY id"
+    ).fetchall()
+
     return render_template(
         "admin_dashboard.html",
         pendientes=solicitudes_clientes,
@@ -2828,6 +2833,7 @@ def admin_dashboard(user):
         auditoria_sin_coordenadas=auditoria_sin_coordenadas,
         auditoria_programada_sin_ruta=auditoria_programada_sin_ruta,
         total_auditoria_rutas=total_auditoria_rutas,
+        pacientes_prueba=pacientes_prueba,
         zonas=zonas,
         zona_actual=zona_actual,
         puntos_zona=puntos_zona,
