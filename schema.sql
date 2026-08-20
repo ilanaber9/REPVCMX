@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS productividad;
 DROP TABLE IF EXISTS vacaciones_registros;
 DROP TABLE IF EXISTS vacaciones_saldo;
 DROP TABLE IF EXISTS horas_extra;
+DROP TABLE IF EXISTS avisos_programados;
 DROP TABLE IF EXISTS users;
 
 CREATE TABLE users (
@@ -136,6 +137,17 @@ CREATE TABLE horas_extra (
   hora_salida TEXT NOT NULL,
   horas_trabajadas REAL NOT NULL,
   horas_extra REAL NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE avisos_programados (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  telefono TEXT NOT NULL,
+  content_sid_env TEXT NOT NULL,
+  content_variables_json TEXT,
+  cuerpo_libre TEXT NOT NULL,
+  enviar_despues_de TEXT NOT NULL,
+  enviado INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 

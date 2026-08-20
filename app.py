@@ -10,11 +10,13 @@ import socket
 import sqlite3
 import subprocess
 import threading
+import time as time_module
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
 from email.mime.text import MIMEText
 from functools import wraps
 from math import atan2, cos, radians, sin, sqrt
+from zoneinfo import ZoneInfo
 import urllib.error
 import urllib.request
 from urllib.parse import urlencode
@@ -60,6 +62,20 @@ ESTADO_LABELS = {
     "cancelada": "Cancelada",
     "lista_espera": "En lista de espera",
 }
+
+# Se usa para toda decisión que dependa de "qué hora es" (el corte de las 9pm para avisos, entre
+# otras) en vez de confiar en la hora local del sistema — en Render el servidor corre en UTC, así
+# que datetime.now() o datetime('now','localtime') ahí NO son la hora de Ciudad de México.
+ZONA_HORARIA_NEGOCIO = ZoneInfo("America/Mexico_City")
+HORA_CORTE_AVISOS_NOCTURNO = dtime(21, 0)  # después de esta hora, un aviso de ruta programada se
+# pospone hasta la mañana siguiente en vez de mandarse de inmediato, para no interrumpir el
+# descanso del paciente.
+HORA_ENVIO_AVISOS_MATUTINO = dtime(7, 0)
+
+
+def ahora_negocio():
+    return datetime.now(ZONA_HORARIA_NEGOCIO)
+
 
 # Filiberto Gómez 279, Tlalnepantla de Baz, Estado de México — punto de partida/regreso.
 DEPOT_LAT = 19.5438982
@@ -658,7 +674,8 @@ def _notificar_paradas_programadas(parada_ids):
                 f"Sí puedo: {link_si}\n"
                 f"No puedo: {link_no}\n"
             )
-            enviar_whatsapp_primer_contacto(
+            enviar_whatsapp_primer_contacto_respetando_horario(
+                conn,
                 telefono_whatsapp_e164(paciente["telefono"]),
                 "TWILIO_TEMPLATE_RUTA_PROGRAMADA_SID",
                 {
@@ -668,6 +685,7 @@ def _notificar_paradas_programadas(parada_ids):
                 },
                 cuerpo,
             )
+            conn.commit()
     finally:
         conn.close()
 
@@ -884,6 +902,68 @@ def enviar_whatsapp_primer_contacto(destinatario, content_sid_env, content_varia
     if content_sid:
         return enviar_whatsapp_template(destinatario, content_sid, content_variables)
     return enviar_whatsapp(destinatario, cuerpo_libre)
+
+
+def enviar_whatsapp_primer_contacto_respetando_horario(db, destinatario, content_sid_env, content_variables, cuerpo_libre):
+    """Como enviar_whatsapp_primer_contacto(), pero si ya pasan de las 9:00pm (hora de Ciudad de
+    México) no manda el mensaje de inmediato — lo deja guardado para enviarse a primera hora del
+    día siguiente, para no interrumpir el descanso del paciente con una notificación tardía."""
+    ahora = ahora_negocio()
+    if ahora.time() < HORA_CORTE_AVISOS_NOCTURNO:
+        return enviar_whatsapp_primer_contacto(destinatario, content_sid_env, content_variables, cuerpo_libre)
+    manana = (ahora + timedelta(days=1)).replace(
+        hour=HORA_ENVIO_AVISOS_MATUTINO.hour, minute=HORA_ENVIO_AVISOS_MATUTINO.minute,
+        second=0, microsecond=0,
+    )
+    db.execute(
+        "INSERT INTO avisos_programados (telefono, content_sid_env, content_variables_json, cuerpo_libre, enviar_despues_de) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            destinatario, content_sid_env,
+            json.dumps(content_variables) if content_variables else None,
+            cuerpo_libre, manana.strftime("%Y-%m-%d %H:%M:%S"),
+        ),
+    )
+    return None
+
+
+def procesar_avisos_programados():
+    """Manda los avisos que se pospusieron por generarse después de las 9:00pm (ver
+    enviar_whatsapp_primer_contacto_respetando_horario) y ya les llegó su hora. Corre desde un
+    hilo en segundo plano que se revisa periódicamente (ver _hilo_avisos_programados) — así
+    sobrevive aunque el servidor se reinicie entre que se guardó el aviso y que le tocaba salir.
+    Reclama cada aviso con un UPDATE condicionado antes de mandarlo, para que si hay más de un
+    proceso de gunicorn corriendo este mismo chequeo a la vez, cada aviso solo se mande una vez."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 20000")
+    try:
+        ahora_texto = ahora_negocio().strftime("%Y-%m-%d %H:%M:%S")
+        pendientes = conn.execute(
+            "SELECT * FROM avisos_programados WHERE enviado = 0 AND enviar_despues_de <= ?", (ahora_texto,)
+        ).fetchall()
+        for aviso in pendientes:
+            cur = conn.execute(
+                "UPDATE avisos_programados SET enviado = 1 WHERE id = ? AND enviado = 0", (aviso["id"],)
+            )
+            conn.commit()
+            if cur.rowcount == 0:
+                continue
+            content_variables = json.loads(aviso["content_variables_json"]) if aviso["content_variables_json"] else None
+            enviar_whatsapp_primer_contacto(
+                aviso["telefono"], aviso["content_sid_env"], content_variables, aviso["cuerpo_libre"],
+            )
+    finally:
+        conn.close()
+
+
+def _hilo_avisos_programados():
+    while True:
+        try:
+            procesar_avisos_programados()
+        except Exception as e:
+            print(f"[avisos_programados] error: {e}")
+        time_module.sleep(300)
 
 
 def validar_firma_twilio(url, parametros_post, firma_recibida):
@@ -4584,6 +4664,7 @@ def webhook_whatsapp():
 
 
 init_db()
+threading.Thread(target=_hilo_avisos_programados, daemon=True).start()
 
 if __name__ == "__main__":
     debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
