@@ -4,6 +4,7 @@ import hmac
 import io
 import json
 import os
+import random
 import re
 import secrets
 import smtplib
@@ -4108,6 +4109,57 @@ def admin_eliminar_pedido(user, pedido_id):
     db.commit()
     flash("Pedido eliminado.", "success")
     return redirect(url_for("admin_dashboard", tab="pedidos"))
+
+
+# ---------- Datos de prueba ----------
+
+@app.route("/admin/pacientes-prueba/generar", methods=["POST"])
+@login_required("admin")
+def admin_generar_pacientes_prueba(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede generar datos de prueba.", "error")
+        return redirect(url_for("admin_dashboard", tab="auditoria"))
+    if not os.path.exists(SEED_SOLICITUDES_PATH):
+        flash("No se encontró seed_solicitudes.json para basar los puntos de prueba.", "error")
+        return redirect(url_for("admin_dashboard", tab="auditoria"))
+    with open(SEED_SOLICITUDES_PATH, encoding="utf-8") as f:
+        puntos_reales = json.load(f)
+    cantidad = min(450, len(puntos_reales))
+    muestra = random.sample(puntos_reales, cantidad)
+    db = get_db()
+    for i, p in enumerate(muestra, start=1):
+        # Un pequeño desplazamiento aleatorio (~10-100m) para que no quede exactamente en la misma
+        # coordenada que el punto real del que se basó — así no bloquea a un paciente real que se
+        # registre después en esa misma dirección (direccion_ya_registrada las compararía como
+        # duplicadas si coincidieran exacto).
+        lat = p["lat"] + random.uniform(-0.0008, 0.0008)
+        lon = p["lon"] + random.uniform(-0.0008, 0.0008)
+        db.execute(
+            "INSERT INTO solicitudes (nombre_contacto, direccion, material, lat, lon, zona, estado) "
+            "VALUES (?, ?, 'PVC', ?, ?, ?, 'pendiente')",
+            (f"Prueba {i}", f"{p['direccion']} (prueba)", lat, lon, p["zona"]),
+        )
+    db.commit()
+    flash(f"Se generaron {cantidad} pacientes de prueba (\"Prueba 1\" a \"Prueba {cantidad}\").", "success")
+    return redirect(url_for("admin_dashboard", tab="auditoria"))
+
+
+@app.route("/admin/pacientes-prueba/eliminar", methods=["POST"])
+@login_required("admin")
+def admin_eliminar_pacientes_prueba(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede eliminar datos de prueba.", "error")
+        return redirect(url_for("admin_dashboard", tab="auditoria"))
+    db = get_db()
+    ids = [r["id"] for r in db.execute(
+        "SELECT id FROM solicitudes WHERE nombre_contacto LIKE 'Prueba %'"
+    ).fetchall()]
+    for sid in ids:
+        db.execute("DELETE FROM paradas WHERE solicitud_id = ?", (sid,))
+    db.execute("DELETE FROM solicitudes WHERE nombre_contacto LIKE 'Prueba %'")
+    db.commit()
+    flash(f"Se eliminaron {len(ids)} paciente(s) de prueba.", "success")
+    return redirect(url_for("admin_dashboard", tab="auditoria"))
 
 
 # ---------- Reportes (Excel) ----------

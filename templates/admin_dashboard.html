@@ -191,6 +191,26 @@
 </div>
 
 <div class="tab-panel" data-tab="auditoria">
+  {% if current_user['es_admin_general'] %}
+  <div class="card">
+    <h1 style="margin:0;">Datos de prueba</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Genera pacientes de prueba (etiquetados "Prueba 1", "Prueba 2"…) para probar la creación de
+      rutas, basados en ubicaciones reales de tu zona de cobertura. Bórralos cuando termines de
+      probar — no son pacientes reales.
+    </p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <form method="post" action="{{ url_for('admin_generar_pacientes_prueba') }}">
+        <button type="submit" class="secondary">Generar 450 pacientes de prueba</button>
+      </form>
+      <form method="post" action="{{ url_for('admin_eliminar_pacientes_prueba') }}"
+            onsubmit="return confirm('¿Eliminar todos los pacientes de prueba (\'Prueba 1\', \'Prueba 2\'…)? Esto no afecta a ningún paciente real.');">
+        <button type="submit" class="danger">Eliminar pacientes de prueba</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="card">
     <h1 style="margin:0;">Sin zona asignada</h1>
     <p style="color:var(--muted); font-size:0.9rem;">
