@@ -6,10 +6,10 @@
 {% endblock %}
 {% block content %}
 <div class="card">
-  <a href="{{ url_for('admin_dashboard', tab='solicitudes') }}" style="font-size:0.85rem;">&larr; Volver</a>
+  <a href="{{ url_for('admin_rutas_masivas') }}" style="font-size:0.85rem;">&larr; Volver</a>
   <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
     <h1 style="margin:0;">{{ zona }}</h1>
-    <a class="btn small" href="{{ url_for('admin_dashboard', tab='solicitudes', zona=zona) }}">Programar esta ruta</a>
+    <a class="btn small" href="{{ url_for('admin_rutas_masivas') }}">Programar esta ruta</a>
   </div>
   <p style="color:var(--muted); font-size:0.9rem;">{{ puntos|length }} puntos pendientes, sin programar todavía.</p>
   {% if estimado %}
