@@ -49,19 +49,33 @@
   {% endif %}
   {% if candidatos %}
   <form method="post" action="{{ url_for('admin_agregar_paciente_ruta', ruta_id=ruta['id']) }}" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
-    <div style="flex:1; min-width:220px;">
-      <label>Paciente pendiente en {{ ruta['zona'] }}</label>
-      <select name="solicitud_id" required>
-        <option value="" disabled selected>Selecciona un paciente</option>
+    <div style="flex:1; min-width:260px;">
+      <label>Buscar paciente pendiente por nombre o teléfono</label>
+      <input type="text" id="buscar-candidato" placeholder="Escribe un nombre o teléfono..." autocomplete="off">
+      <select name="solicitud_id" id="select-candidato" required size="6" style="margin-top:6px;">
         {% for c in candidatos %}
-        <option value="{{ c['id'] }}">{{ c['nombre'] }} — {{ c['direccion'] }}</option>
+        <option value="{{ c['id'] }}" data-buscar="{{ (c['nombre'] ~ ' ' ~ (c['telefono'] or '')) | lower }}">
+          {{ c['nombre'] }}{% if c['telefono'] %} — {{ c['telefono'] }}{% endif %} — {{ c['direccion'] }}{% if c['zona'] %} ({{ c['zona'] }}){% else %} (sin zona){% endif %}
+        </option>
         {% endfor %}
       </select>
     </div>
     <button type="submit">Agregar a la ruta</button>
   </form>
+  <script>
+  (function () {
+    var buscar = document.getElementById('buscar-candidato');
+    var select = document.getElementById('select-candidato');
+    buscar.addEventListener('input', function () {
+      var q = buscar.value.trim().toLowerCase();
+      Array.from(select.options).forEach(function (opt) {
+        opt.hidden = q.length > 0 && opt.dataset.buscar.indexOf(q) === -1;
+      });
+    });
+  })();
+  </script>
   {% else %}
-  <p class="empty">No hay pacientes pendientes en la zona "{{ ruta['zona'] or 'sin asignar' }}" para agregar.</p>
+  <p class="empty">No hay pacientes pendientes disponibles para agregar.</p>
   {% endif %}
 </div>
 {% endif %}

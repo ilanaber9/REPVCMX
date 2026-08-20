@@ -3940,18 +3940,21 @@ def admin_ver_ruta(user, ruta_id):
 
     candidatos = []
     aviso_exceso = None
-    if ruta["estado"] != "completada" and ruta["zona"]:
+    if ruta["estado"] != "completada":
         ids_en_ruta = set()
         for p in paradas:
             ids_en_ruta.add(p["solicitud_id"])
             if p["solicitud_extra_id"]:
                 ids_en_ruta.add(p["solicitud_extra_id"])
+        # Cualquier paciente inscrito con una solicitud pendiente, no solo los de la misma zona que
+        # la ruta — el admin puede necesitar agregar a alguien puntual aunque su zona registrada no
+        # coincida; el aviso de exceso de 7:30 ya protege contra meter a alguien demasiado lejos.
         candidatos = db.execute(
-            "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion "
+            "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, "
+            "COALESCE(u.telefono, s.telefono) AS telefono, s.zona "
             "FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
-            "WHERE s.zona = ? AND s.estado IN ('pendiente', 'pendiente_entrega') "
-            f"AND {condicion_lista_para_recoleccion('s')} ORDER BY s.created_at",
-            (ruta["zona"],),
+            "WHERE s.estado IN ('pendiente', 'pendiente_entrega') "
+            f"AND {condicion_lista_para_recoleccion('s')} ORDER BY nombre",
         ).fetchall()
         candidatos = [c for c in candidatos if c["id"] not in ids_en_ruta]
 
