@@ -4435,16 +4435,10 @@ def admin_generar_pacientes_prueba(user):
     muestra = random.sample(puntos_reales, cantidad)
     db = get_db()
     for i, p in enumerate(muestra, start=1):
-        # Un pequeño desplazamiento aleatorio (~10-100m) para que no quede exactamente en la misma
-        # coordenada que el punto real del que se basó — así no bloquea a un paciente real que se
-        # registre después en esa misma dirección (direccion_ya_registrada las compararía como
-        # duplicadas si coincidieran exacto).
-        lat = p["lat"] + random.uniform(-0.0008, 0.0008)
-        lon = p["lon"] + random.uniform(-0.0008, 0.0008)
         db.execute(
             "INSERT INTO solicitudes (nombre_contacto, direccion, material, lat, lon, zona, estado) "
             "VALUES (?, ?, 'PVC', ?, ?, ?, 'pendiente')",
-            (f"Prueba {i}", f"{p['direccion']} (prueba)", lat, lon, p["zona"]),
+            (f"Prueba {i}", f"{p['direccion']} (prueba)", p["lat"], p["lon"], p["zona"]),
         )
     db.commit()
     flash(f"Se generaron {cantidad} pacientes de prueba (\"Prueba 1\" a \"Prueba {cantidad}\").", "success")
