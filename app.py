@@ -530,7 +530,8 @@ def siguiente_numero_ruta(db):
     el máximo usado tanto en zonas importadas como en nombres de rutas ya creadas."""
     maximo = 0
     filas = db.execute(
-        "SELECT zona AS nombre FROM solicitudes WHERE zona IS NOT NULL UNION SELECT nombre FROM rutas"
+        "SELECT zona AS nombre FROM solicitudes WHERE zona IS NOT NULL "
+        "UNION SELECT nombre FROM rutas UNION SELECT zona AS nombre FROM zonas_referencia"
     ).fetchall()
     for f in filas:
         m = re.match(r"Ruta (\d+)", f["nombre"] or "")
@@ -1083,10 +1084,13 @@ def ordenar_grupo_por_cercania(grupo, minutos_max=DURACION_MAXIMA_RUTA_MIN):
 
 
 def zona_mas_cercana(db, lat, lon):
-    """Busca, entre los puntos que ya tienen zona asignada, cuál está más cerca de (lat, lon)
-    y devuelve (zona, distancia_km), o None si no hay ningún punto con zona y coordenadas."""
+    """Busca, entre los puntos que ya tienen zona asignada (solicitudes reales de hoy, más los
+    puntos de referencia guardados en zonas_referencia para no depender solo de pacientes activos),
+    cuál está más cerca de (lat, lon) y devuelve (zona, distancia_km), o None si no hay ningún
+    punto con zona y coordenadas."""
     filas = db.execute(
-        "SELECT zona, lat, lon FROM solicitudes WHERE zona IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL"
+        "SELECT zona, lat, lon FROM solicitudes WHERE zona IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL "
+        "UNION ALL SELECT zona, lat, lon FROM zonas_referencia"
     ).fetchall()
     mejor = None
     for f in filas:
@@ -1100,13 +1104,15 @@ LIMITE_MINUTOS_COBERTURA = 20
 
 
 def fuera_de_cobertura(db, lat, lon):
-    """True si no hay ningún punto ya cubierto (con zona asignada) a menos de
-    LIMITE_MINUTOS_COBERTURA minutos de manejo real desde (lat, lon). Si todavía no hay ningún
-    punto con zona en el sistema (arranque en frío, p. ej. justo después de vaciar la base de
-    datos), se compara contra el depósito en su lugar — así la primera zona que se cree de forma
-    automática sigue respetando un radio real de cobertura, en vez de aceptar cualquier lugar."""
+    """True si no hay ningún punto ya cubierto (con zona asignada, ya sea una solicitud real de
+    hoy o un punto de referencia guardado en zonas_referencia) a menos de LIMITE_MINUTOS_COBERTURA
+    minutos de manejo real desde (lat, lon). Si todavía no hay ningún punto con zona en el sistema
+    (arranque en frío, p. ej. justo después de vaciar la base de datos), se compara contra el
+    depósito en su lugar — así la primera zona que se cree de forma automática sigue respetando un
+    radio real de cobertura, en vez de aceptar cualquier lugar."""
     filas = db.execute(
-        "SELECT lat, lon FROM solicitudes WHERE zona IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL"
+        "SELECT lat, lon FROM solicitudes WHERE zona IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL "
+        "UNION ALL SELECT lat, lon FROM zonas_referencia"
     ).fetchall()
     if not filas:
         mejor = {"lat": DEPOT_LAT, "lon": DEPOT_LON}
@@ -1365,17 +1371,96 @@ def init_db():
             ("Administrador", "admin@rutas.local", generate_password_hash("admin123", method="pbkdf2:sha256"), "admin"),
         )
         if os.path.exists(SEED_SOLICITUDES_PATH):
+            # Estos puntos no son pacientes reales — son solo la referencia de cobertura con la
+            # que se delimitaron las zonas (ver zonas_referencia y fuera_de_cobertura()). Por eso
+            # se cargan como referencia, no como solicitudes: así una base nueva arranca con la
+            # misma cobertura ya delimitada, sin ensuciar la lista de pacientes con ejemplos.
             with open(SEED_SOLICITUDES_PATH, encoding="utf-8") as f:
                 puntos = json.load(f)
             for p in puntos:
                 db.execute(
-                    "INSERT INTO solicitudes (nombre_contacto, direccion, material, lat, lon, zona, estado) "
-                    "VALUES (?, ?, ?, ?, ?, ?, 'pendiente')",
-                    (p["nombre_contacto"], p["direccion"], p["material"], p["lat"], p["lon"], p["zona"]),
+                    "INSERT INTO zonas_referencia (zona, lat, lon) VALUES (?, ?, ?)",
+                    (p["zona"], p["lat"], p["lon"]),
                 )
-            print(f"Se cargaron {len(puntos)} puntos de recolección desde seed_solicitudes.json.")
+            print(f"Se cargaron {len(puntos)} puntos de referencia de cobertura desde seed_solicitudes.json.")
         db.commit()
         print("Base de datos creada. Login admin -> admin@rutas.local / admin123")
+    db.close()
+    aplicar_migraciones_pendientes()
+
+
+def aplicar_migraciones_pendientes():
+    """Aplica a una base de datos YA EXISTENTE los cambios de esquema que se agregaron después de
+    que Render pasó a usar disco persistente — antes, cada deploy recreaba la base desde cero con
+    schema.sql ya actualizado, así que nunca hacía falta esto; ahora la base sobrevive entre
+    deploys, así que un cambio nuevo en schema.sql no llega solo a producción. Cada paso se
+    protege para poder correr en cada arranque sin problema (columna/tabla ya existente se
+    ignora), así que agregar aquí un paso nuevo cada vez que se toque el esquema es suficiente
+    para que se aplique solo, tanto en local como en Render, sin depender de correr nada a mano."""
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+
+    columnas_users = {r["name"] for r in db.execute("PRAGMA table_info(users)")}
+    for columna, definicion in [
+        ("telefono", "TEXT"),
+        ("es_admin_general", "INTEGER NOT NULL DEFAULT 0"),
+        ("nef_ultima_vista", "TEXT"),
+    ]:
+        if columna not in columnas_users:
+            db.execute(f"ALTER TABLE users ADD COLUMN {columna} {definicion}")
+
+    tablas = {r["name"] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+    if "horas_extra" not in tablas:
+        db.execute(
+            "CREATE TABLE horas_extra ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  recolector_id INTEGER NOT NULL REFERENCES users(id),"
+            "  fecha TEXT NOT NULL DEFAULT (date('now','localtime')),"
+            "  hora_inicio TEXT NOT NULL,"
+            "  hora_salida TEXT NOT NULL,"
+            "  horas_trabajadas REAL NOT NULL,"
+            "  horas_extra REAL NOT NULL,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
+
+    if "avisos_programados" not in tablas:
+        db.execute(
+            "CREATE TABLE avisos_programados ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  telefono TEXT NOT NULL,"
+            "  content_sid_env TEXT NOT NULL,"
+            "  content_variables_json TEXT,"
+            "  cuerpo_libre TEXT NOT NULL,"
+            "  enviar_despues_de TEXT NOT NULL,"
+            "  enviado INTEGER NOT NULL DEFAULT 0,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
+
+    if "zonas_referencia" not in tablas:
+        db.execute(
+            "CREATE TABLE zonas_referencia ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  zona TEXT NOT NULL,"
+            "  lat REAL NOT NULL,"
+            "  lon REAL NOT NULL,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
+        # Migración única, justo al crear la tabla por primera vez: los puntos de ejemplo
+        # (importados sin cliente_id, nunca fueron pacientes reales) que se usaron para delimitar
+        # la cobertura actual quedan guardados aquí como referencia permanente —así
+        # fuera_de_cobertura()/zona_mas_cercana() los siguen usando— y se eliminan de solicitudes.
+        db.execute(
+            "INSERT INTO zonas_referencia (zona, lat, lon) "
+            "SELECT zona, lat, lon FROM solicitudes "
+            "WHERE cliente_id IS NULL AND zona IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL"
+        )
+        db.execute("DELETE FROM solicitudes WHERE cliente_id IS NULL")
+
+    db.commit()
     db.close()
 
 
