@@ -68,7 +68,9 @@
   <button type="button" class="tab-btn" data-tab="videos">Videos</button>
   <button type="button" class="tab-btn" data-tab="inventarios">Inventarios</button>
   <button type="button" class="tab-btn" data-tab="productividad">Productividad del día</button>
+  {% if current_user['es_admin_general'] %}
   <button type="button" class="tab-btn" data-tab="colaboradores">Colaboradores</button>
+  {% endif %}
   <button type="button" class="tab-btn" data-tab="reportes">Reportes</button>
 </div>
 
@@ -1275,6 +1277,7 @@
   </div>
 </div>
 
+{% if current_user['es_admin_general'] %}
 <div class="tab-panel" data-tab="colaboradores">
   <div class="tabs" style="margin-bottom:16px;">
     <button type="button" class="subtab-btn" data-subtab="vacaciones">Vacaciones</button>
@@ -1596,6 +1599,7 @@
   </div>
   </div>
 </div>
+{% endif %}
 
 <script>
 const TAB_ALIAS = {
