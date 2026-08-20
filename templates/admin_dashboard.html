@@ -68,10 +68,7 @@
   <button type="button" class="tab-btn" data-tab="videos">Videos</button>
   <button type="button" class="tab-btn" data-tab="inventarios">Inventarios</button>
   <button type="button" class="tab-btn" data-tab="productividad">Productividad del día</button>
-  <button type="button" class="tab-btn" data-tab="vacaciones">Vacaciones</button>
-  {% if current_user['es_admin_general'] %}
-  <button type="button" class="tab-btn" data-tab="horas_extra">Horas extra</button>
-  {% endif %}
+  <button type="button" class="tab-btn" data-tab="colaboradores">Colaboradores</button>
   <button type="button" class="tab-btn" data-tab="reportes">Reportes</button>
 </div>
 
@@ -1242,23 +1239,34 @@
   </div>
 </div>
 
-<div class="tab-panel" data-tab="vacaciones">
+<div class="tab-panel" data-tab="colaboradores">
+  <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab-btn" data-subtab="vacaciones">Vacaciones</button>
+    <button type="button" class="subtab-btn" data-subtab="fecha_ingreso">Fecha de ingreso</button>
+    <button type="button" class="subtab-btn" data-subtab="pago_quincenal">Pago quincenal</button>
+    {% if current_user['es_admin_general'] %}
+    <button type="button" class="subtab-btn" data-subtab="horas_extra">Horas extra</button>
+    {% endif %}
+    <button type="button" class="subtab-btn" data-subtab="balance_dias">Balance de días</button>
+  </div>
+
+  <div class="subtab-panel" data-subtab="vacaciones">
   <div class="card">
     <h1 style="margin:0;">Vacaciones</h1>
-    <p style="color:var(--muted); font-size:0.9rem;">Días de vacaciones de cada trabajador — se van descontando conforme se registran.</p>
+    <p style="color:var(--muted); font-size:0.9rem;">Días de vacaciones de cada colaborador — se van descontando conforme se registran.</p>
     {% if not current_user['es_admin_general'] %}
     <p style="color:var(--muted); font-size:0.85rem;">Solo el administrador general puede editar los días de vacaciones. Aquí puedes consultarlos.</p>
     {% endif %}
     <div class="table-scroll">
     <table style="min-width:auto;">
-      <tr><th>Trabajador</th><th>Días totales</th><th>Tomados</th><th>Restantes</th><th></th></tr>
+      <tr><th>Colaborador</th><th>Días totales</th><th>Tomados</th><th>Restantes</th></tr>
       {% for r in resumen_vacaciones %}
       <tr>
-        <td>{{ r['persona'] }}</td>
+        <td>{{ r['colaborador']['nombre'] }}</td>
         <td>
           {% if current_user['es_admin_general'] %}
           <form method="post" action="{{ url_for('admin_actualizar_saldo_vacaciones') }}" style="display:flex; gap:6px; align-items:center;">
-            <input type="hidden" name="persona" value="{{ r['persona'] }}">
+            <input type="hidden" name="colaborador_id" value="{{ r['colaborador']['id'] }}">
             <input type="number" name="dias_totales" min="0" value="{{ r['dias_totales'] }}" style="width:70px;">
             <button type="submit" class="small secondary">Guardar</button>
           </form>
@@ -1272,17 +1280,20 @@
       {% endfor %}
     </table>
     </div>
+    {% if not resumen_vacaciones %}
+    <p class="empty">Agrega colaboradores en "Fecha de ingreso" para poder llevar sus vacaciones.</p>
+    {% endif %}
   </div>
 
   {% if current_user['es_admin_general'] %}
   <div class="card">
     <h2 style="margin-top:0;">Registrar vacaciones</h2>
     <form method="post" action="{{ url_for('admin_nueva_vacacion') }}">
-      <label>Trabajador</label>
-      <select name="persona" required>
+      <label>Colaborador</label>
+      <select name="colaborador_id" required>
         <option value="" disabled selected>Selecciona una opción</option>
-        {% for p in personas_vacaciones %}
-        <option value="{{ p }}">{{ p }}</option>
+        {% for c in colaboradores %}
+        <option value="{{ c['id'] }}">{{ c['nombre'] }}</option>
         {% endfor %}
       </select>
       <label>Del día</label>
@@ -1300,10 +1311,10 @@
     <h2 style="margin-top:0;">Historial</h2>
     {% if vacaciones_registros %}
     <table>
-      <tr><th>Trabajador</th><th>Del</th><th>Al</th><th>Días</th><th>Notas</th>{% if current_user['es_admin_general'] %}<th></th>{% endif %}</tr>
+      <tr><th>Colaborador</th><th>Del</th><th>Al</th><th>Días</th><th>Notas</th>{% if current_user['es_admin_general'] %}<th></th>{% endif %}</tr>
       {% for r in vacaciones_registros %}
       <tr>
-        <td>{{ r['persona'] }}</td>
+        <td>{{ r['colaborador_nombre'] }}</td>
         <td>{{ r['fecha_inicio'] }}</td>
         <td>{{ r['fecha_fin'] }}</td>
         <td>{{ r['dias'] }}</td>
@@ -1323,10 +1334,120 @@
     <p class="empty">Aún no hay vacaciones registradas.</p>
     {% endif %}
   </div>
-</div>
+  </div>
 
-{% if current_user['es_admin_general'] %}
-<div class="tab-panel" data-tab="horas_extra">
+  <div class="subtab-panel" data-subtab="fecha_ingreso">
+  {% if current_user['es_admin_general'] %}
+  <div class="card">
+    <h1 style="margin:0;">Agregar colaborador</h1>
+    <form method="post" action="{{ url_for('admin_nuevo_colaborador') }}">
+      <label>Nombre</label>
+      <input type="text" name="nombre" required>
+      <label>Fecha de ingreso</label>
+      <input type="date" name="fecha_ingreso">
+      <button type="submit">Agregar</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2 style="margin-top:0;">Colaboradores</h2>
+    {% if colaboradores_todos %}
+    <table>
+      <tr><th>Nombre</th><th>Fecha de ingreso</th><th>Estado</th>{% if current_user['es_admin_general'] %}<th></th>{% endif %}</tr>
+      {% for c in colaboradores_todos %}
+      <tr{% if not c['activo'] %} style="opacity:0.55;"{% endif %}>
+        <td>{{ c['nombre'] }}</td>
+        <td>{{ c['fecha_ingreso'] or '—' }}</td>
+        <td>{% if c['activo'] %}<span class="badge programada">Activo</span>{% else %}<span class="badge incidencia">De baja</span>{% endif %}</td>
+        {% if current_user['es_admin_general'] %}
+        <td>
+          {% if c['activo'] %}
+          <form method="post" action="{{ url_for('admin_eliminar_colaborador', colaborador_id=c['id']) }}"
+                onsubmit="return confirm('¿Dar de baja a \'{{ c['nombre'] }}\'? Su historial de vacaciones, balance y pagos se conserva, pero ya no aparecerá para registrar movimientos nuevos.');">
+            <button type="submit" class="small danger">Dar de baja</button>
+          </form>
+          {% else %}—{% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay colaboradores registrados.</p>
+    {% endif %}
+  </div>
+  </div>
+
+  <div class="subtab-panel" data-subtab="pago_quincenal">
+  {% if current_user['es_admin_general'] %}
+  <div class="card">
+    <h1 style="margin:0;">Pago por día de vacaciones</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Este monto se suma automáticamente al pago quincenal de quien haya tomado vacaciones en ese periodo.</p>
+    <form method="post" action="{{ url_for('admin_actualizar_monto_vacaciones') }}" style="display:flex; gap:6px; align-items:center;">
+      <span>$</span>
+      <input type="number" name="monto_dia_vacaciones" min="0" step="0.01" value="{{ monto_dia_vacaciones }}" style="width:110px;">
+      <button type="submit" class="small secondary">Guardar</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0;">Registrar pago quincenal</h2>
+    <form method="post" action="{{ url_for('admin_nuevo_pago_quincenal') }}">
+      <label>Colaborador</label>
+      <select name="colaborador_id" required>
+        <option value="" disabled selected>Selecciona una opción</option>
+        {% for c in colaboradores %}
+        <option value="{{ c['id'] }}">{{ c['nombre'] }}</option>
+        {% endfor %}
+      </select>
+      <label>Del día</label>
+      <input type="date" name="quincena_inicio" required>
+      <label>Al día</label>
+      <input type="date" name="quincena_fin" required>
+      <label>Monto base</label>
+      <input type="number" name="monto_base" min="0" step="0.01" required>
+      <label>Notas (opcional)</label>
+      <textarea name="notas" rows="2"></textarea>
+      <button type="submit">Registrar</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2 style="margin-top:0;">Historial de pagos</h2>
+    {% if pagos_quincenales %}
+    <table>
+      <tr><th>Colaborador</th><th>Del</th><th>Al</th><th>Monto base</th><th>Días de vacaciones</th><th>+ Vacaciones</th><th>Total a pagar</th><th>Notas</th>{% if current_user['es_admin_general'] %}<th></th>{% endif %}</tr>
+      {% for p in pagos_quincenales %}
+      <tr>
+        <td>{{ p['colaborador_nombre'] }}</td>
+        <td>{{ p['quincena_inicio'] }}</td>
+        <td>{{ p['quincena_fin'] }}</td>
+        <td>${{ "%.2f"|format(p['monto_base']) }}</td>
+        <td>{{ p['dias_vacaciones'] }}</td>
+        <td>${{ "%.2f"|format(p['monto_vacaciones']) }}</td>
+        <td><strong>${{ "%.2f"|format(p['monto_total']) }}</strong></td>
+        <td>{{ p['notas'] or '—' }}</td>
+        {% if current_user['es_admin_general'] %}
+        <td>
+          <form method="post" action="{{ url_for('admin_eliminar_pago_quincenal', pago_id=p['id']) }}"
+                onsubmit="return confirm('¿Eliminar este pago quincenal?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay pagos quincenales registrados.</p>
+    {% endif %}
+  </div>
+  </div>
+
+  {% if current_user['es_admin_general'] %}
+  <div class="subtab-panel" data-subtab="horas_extra">
   <div class="card">
     <h1 style="margin:0;">Horas extra</h1>
     <p style="color:var(--muted); font-size:0.9rem;">Horas extra registradas por cada recolector (jornada normal: 8h/día).</p>
@@ -1363,8 +1484,82 @@
     <p class="empty">Aún no hay horas extra registradas.</p>
     {% endif %}
   </div>
+  </div>
+  {% endif %}
+
+  <div class="subtab-panel" data-subtab="balance_dias">
+  <div class="card">
+    <h1 style="margin:0;">Balance de días</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Días que un colaborador trabaja en lugar de otro. Suma (+1) el día que trabajó de más, resta (-1)
+      el día que faltó y todavía debe reponer.
+    </p>
+    <div class="table-scroll">
+    <table style="min-width:auto;">
+      <tr><th>Colaborador</th><th>Balance</th></tr>
+      {% for r in resumen_balance_dias %}
+      <tr>
+        <td>{{ r['colaborador']['nombre'] }}</td>
+        <td><strong style="color:{{ 'var(--danger)' if r['balance'] < 0 else 'var(--green-dark)' if r['balance'] > 0 else 'inherit' }};">{{ r['balance'] }}</strong></td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+    {% if not resumen_balance_dias %}
+    <p class="empty">Agrega colaboradores en "Fecha de ingreso" para poder llevar su balance.</p>
+    {% endif %}
+  </div>
+
+  {% if current_user['es_admin_general'] %}
+  <div class="card">
+    <h2 style="margin-top:0;">Registrar movimiento</h2>
+    <form method="post" action="{{ url_for('admin_nuevo_movimiento_balance') }}">
+      <label>Colaborador</label>
+      <select name="colaborador_id" required>
+        <option value="" disabled selected>Selecciona una opción</option>
+        {% for c in colaboradores %}
+        <option value="{{ c['id'] }}">{{ c['nombre'] }}</option>
+        {% endfor %}
+      </select>
+      <label>Fecha</label>
+      <input type="date" name="fecha" required>
+      <label>Días (positivo si trabajó de más, negativo si debe reponer)</label>
+      <input type="number" name="dias" step="1" placeholder="1 o -1" required>
+      <label>Motivo (opcional)</label>
+      <textarea name="motivo" rows="2"></textarea>
+      <button type="submit">Registrar</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2 style="margin-top:0;">Historial de movimientos</h2>
+    {% if balance_dias_movimientos %}
+    <table>
+      <tr><th>Colaborador</th><th>Fecha</th><th>Días</th><th>Motivo</th>{% if current_user['es_admin_general'] %}<th></th>{% endif %}</tr>
+      {% for m in balance_dias_movimientos %}
+      <tr>
+        <td>{{ m['colaborador_nombre'] }}</td>
+        <td>{{ m['fecha'] }}</td>
+        <td>{{ '+' if m['dias'] > 0 else '' }}{{ m['dias'] }}</td>
+        <td>{{ m['motivo'] or '—' }}</td>
+        {% if current_user['es_admin_general'] %}
+        <td>
+          <form method="post" action="{{ url_for('admin_eliminar_movimiento_balance', movimiento_id=m['id']) }}"
+                onsubmit="return confirm('¿Eliminar este movimiento?');">
+            <button type="submit" class="small danger">Eliminar</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Aún no hay movimientos registrados.</p>
+    {% endif %}
+  </div>
+  </div>
 </div>
-{% endif %}
 
 <script>
 const TAB_ALIAS = {
@@ -1386,6 +1581,11 @@ const TAB_ALIAS = {
   botes: {tab: 'inventarios', subtab: 'botes'},
   cajas: {tab: 'inventarios', subtab: 'cajas'},
   semana: {tab: 'productividad', subtab: 'semana'},
+  vacaciones: {tab: 'colaboradores', subtab: 'vacaciones'},
+  fecha_ingreso: {tab: 'colaboradores', subtab: 'fecha_ingreso'},
+  pago_quincenal: {tab: 'colaboradores', subtab: 'pago_quincenal'},
+  horas_extra: {tab: 'colaboradores', subtab: 'horas_extra'},
+  balance_dias: {tab: 'colaboradores', subtab: 'balance_dias'},
 };
 
 function activarTab(tabParam) {

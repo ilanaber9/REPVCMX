@@ -114,7 +114,6 @@ ZONA_BOOTSTRAP_DEFAULT = "Zona 1"
 DIAS_ESPERA_DONACION = 30  # pacientes en modalidad 'donacion': cada cuántos días se vuelven a
 # programar después de su última recolección (o de entregado el bote, si es la primera).
 DIAS_ESPERA_COMPRA = 60  # pacientes en modalidad 'compra': ídem, pero cada 60 días.
-PERSONAS_VACACIONES = ["Lety", "Martin", "Gaby", "Paola", "Monserrat"]
 DIAS_VACACIONES_DEFAULT = 12
 DURACION_MAXIMA_RUTA_MIN = 7 * 60 + 30  # 7:30 hrs por ruta antes de dividirla en otra
 MIN_PARADAS_POR_RUTA = 12  # buscamos que cada ruta traiga al menos este número de pacientes,
@@ -1413,6 +1412,7 @@ def init_db():
             "INSERT INTO users (name, email, password_hash, role, es_admin_general) VALUES (?, ?, ?, ?, 1)",
             ("Administrador", "admin@rutas.local", generate_password_hash("admin123", method="pbkdf2:sha256"), "admin"),
         )
+        db.execute("INSERT INTO configuracion_pago (id, monto_dia_vacaciones) VALUES (1, 0)")
         if os.path.exists(SEED_SOLICITUDES_PATH):
             # Estos puntos no son pacientes reales — son solo la referencia de cobertura con la
             # que se delimitaron las zonas (ver zonas_referencia y fuera_de_cobertura()). Por eso
@@ -1502,6 +1502,97 @@ def aplicar_migraciones_pendientes():
             "WHERE cliente_id IS NULL AND zona IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL"
         )
         db.execute("DELETE FROM solicitudes WHERE cliente_id IS NULL")
+
+    if "colaboradores" not in tablas:
+        db.execute(
+            "CREATE TABLE colaboradores ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  nombre TEXT NOT NULL,"
+            "  fecha_ingreso TEXT,"
+            "  activo INTEGER NOT NULL DEFAULT 1,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
+        # Migración única: "Vacaciones" pasa de una lista fija de 5 nombres a una tabla real de
+        # colaboradores que se pueden agregar/dar de baja — se crean aquí con esos mismos 5
+        # nombres para no perder el historial ya registrado, y las tablas de vacaciones (que
+        # usaban el nombre como texto, con un CHECK a esa lista fija) se reconstruyen para
+        # apuntar a colaborador_id en su lugar, porque SQLite no permite quitar un CHECK con
+        # ALTER TABLE.
+        ids_por_nombre = {}
+        for nombre in ("Lety", "Martin", "Gaby", "Paola", "Monserrat"):
+            cur = db.execute("INSERT INTO colaboradores (nombre) VALUES (?)", (nombre,))
+            ids_por_nombre[nombre] = cur.lastrowid
+
+        saldos_viejos = db.execute("SELECT persona, dias_totales FROM vacaciones_saldo").fetchall()
+        db.execute("ALTER TABLE vacaciones_saldo RENAME TO vacaciones_saldo_old")
+        db.execute(
+            "CREATE TABLE vacaciones_saldo ("
+            "  colaborador_id INTEGER PRIMARY KEY REFERENCES colaboradores(id),"
+            "  dias_totales INTEGER NOT NULL DEFAULT 12"
+            ")"
+        )
+        for fila in saldos_viejos:
+            cid = ids_por_nombre.get(fila["persona"])
+            if cid:
+                db.execute(
+                    "INSERT INTO vacaciones_saldo (colaborador_id, dias_totales) VALUES (?, ?)",
+                    (cid, fila["dias_totales"]),
+                )
+        db.execute("DROP TABLE vacaciones_saldo_old")
+
+        registros_viejos = db.execute("SELECT * FROM vacaciones_registros").fetchall()
+        db.execute("ALTER TABLE vacaciones_registros RENAME TO vacaciones_registros_old")
+        db.execute(
+            "CREATE TABLE vacaciones_registros ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  colaborador_id INTEGER NOT NULL REFERENCES colaboradores(id),"
+            "  fecha_inicio TEXT NOT NULL,"
+            "  fecha_fin TEXT NOT NULL,"
+            "  dias INTEGER NOT NULL,"
+            "  notas TEXT,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
+        for fila in registros_viejos:
+            cid = ids_por_nombre.get(fila["persona"])
+            if cid:
+                db.execute(
+                    "INSERT INTO vacaciones_registros "
+                    "(colaborador_id, fecha_inicio, fecha_fin, dias, notas, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (cid, fila["fecha_inicio"], fila["fecha_fin"], fila["dias"], fila["notas"], fila["created_at"]),
+                )
+        db.execute("DROP TABLE vacaciones_registros_old")
+
+        db.execute(
+            "CREATE TABLE balance_dias_movimientos ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  colaborador_id INTEGER NOT NULL REFERENCES colaboradores(id),"
+            "  fecha TEXT NOT NULL,"
+            "  dias INTEGER NOT NULL,"
+            "  motivo TEXT,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
+        db.execute(
+            "CREATE TABLE pagos_quincenales ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  colaborador_id INTEGER NOT NULL REFERENCES colaboradores(id),"
+            "  quincena_inicio TEXT NOT NULL,"
+            "  quincena_fin TEXT NOT NULL,"
+            "  monto_base REAL NOT NULL DEFAULT 0,"
+            "  notas TEXT,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
+        db.execute(
+            "CREATE TABLE configuracion_pago ("
+            "  id INTEGER PRIMARY KEY CHECK (id = 1),"
+            "  monto_dia_vacaciones REAL NOT NULL DEFAULT 0"
+            ")"
+        )
+        db.execute("INSERT INTO configuracion_pago (id, monto_dia_vacaciones) VALUES (1, 0)")
 
     db.commit()
     db.close()
@@ -2637,27 +2728,73 @@ def admin_dashboard(user):
             totales_actividad_semana[r["actividad"]] += kg
     total_semana_kg = sum(totales_persona_semana.values())
 
+    colaboradores = db.execute("SELECT * FROM colaboradores WHERE activo = 1 ORDER BY nombre").fetchall()
+    colaboradores_todos = db.execute("SELECT * FROM colaboradores ORDER BY nombre").fetchall()
+
     saldo_vacaciones = {
-        r["persona"]: r["dias_totales"]
-        for r in db.execute("SELECT persona, dias_totales FROM vacaciones_saldo").fetchall()
+        r["colaborador_id"]: r["dias_totales"]
+        for r in db.execute("SELECT colaborador_id, dias_totales FROM vacaciones_saldo").fetchall()
     }
     tomados_vacaciones = {
-        r["persona"]: r["dias"]
+        r["colaborador_id"]: r["dias"]
         for r in db.execute(
-            "SELECT persona, COALESCE(SUM(dias), 0) AS dias FROM vacaciones_registros GROUP BY persona"
+            "SELECT colaborador_id, COALESCE(SUM(dias), 0) AS dias FROM vacaciones_registros GROUP BY colaborador_id"
         ).fetchall()
     }
     resumen_vacaciones = []
-    for p in PERSONAS_VACACIONES:
-        totales = saldo_vacaciones.get(p, DIAS_VACACIONES_DEFAULT)
-        tomados = tomados_vacaciones.get(p, 0)
+    for c in colaboradores:
+        totales = saldo_vacaciones.get(c["id"], DIAS_VACACIONES_DEFAULT)
+        tomados = tomados_vacaciones.get(c["id"], 0)
         resumen_vacaciones.append({
-            "persona": p, "dias_totales": totales, "dias_tomados": tomados,
+            "colaborador": c, "dias_totales": totales, "dias_tomados": tomados,
             "dias_restantes": totales - tomados,
         })
     vacaciones_registros = db.execute(
-        "SELECT * FROM vacaciones_registros ORDER BY fecha_inicio DESC"
+        "SELECT v.*, c.nombre AS colaborador_nombre FROM vacaciones_registros v "
+        "JOIN colaboradores c ON c.id = v.colaborador_id ORDER BY v.fecha_inicio DESC"
     ).fetchall()
+
+    balance_por_colaborador = {
+        r["colaborador_id"]: r["total"]
+        for r in db.execute(
+            "SELECT colaborador_id, COALESCE(SUM(dias), 0) AS total FROM balance_dias_movimientos "
+            "GROUP BY colaborador_id"
+        ).fetchall()
+    }
+    resumen_balance_dias = [
+        {"colaborador": c, "balance": balance_por_colaborador.get(c["id"], 0)} for c in colaboradores
+    ]
+    balance_dias_movimientos = db.execute(
+        "SELECT b.*, c.nombre AS colaborador_nombre FROM balance_dias_movimientos b "
+        "JOIN colaboradores c ON c.id = b.colaborador_id ORDER BY b.fecha DESC, b.id DESC"
+    ).fetchall()
+
+    monto_dia_vacaciones = db.execute(
+        "SELECT monto_dia_vacaciones FROM configuracion_pago WHERE id = 1"
+    ).fetchone()["monto_dia_vacaciones"]
+    pagos_quincenales_rows = db.execute(
+        "SELECT p.*, c.nombre AS colaborador_nombre FROM pagos_quincenales p "
+        "JOIN colaboradores c ON c.id = p.colaborador_id ORDER BY p.quincena_inicio DESC"
+    ).fetchall()
+    pagos_quincenales = []
+    for p in pagos_quincenales_rows:
+        q_inicio = date.fromisoformat(p["quincena_inicio"])
+        q_fin = date.fromisoformat(p["quincena_fin"])
+        registros_traslape = db.execute(
+            "SELECT fecha_inicio, fecha_fin FROM vacaciones_registros WHERE colaborador_id = ? "
+            "AND fecha_inicio <= ? AND fecha_fin >= ?",
+            (p["colaborador_id"], p["quincena_fin"], p["quincena_inicio"]),
+        ).fetchall()
+        dias_vacaciones_quincena = 0
+        for v in registros_traslape:
+            inicio_traslape = max(q_inicio, date.fromisoformat(v["fecha_inicio"]))
+            fin_traslape = min(q_fin, date.fromisoformat(v["fecha_fin"]))
+            dias_vacaciones_quincena += (fin_traslape - inicio_traslape).days + 1
+        pago = dict(p)
+        pago["dias_vacaciones"] = dias_vacaciones_quincena
+        pago["monto_vacaciones"] = round(dias_vacaciones_quincena * monto_dia_vacaciones, 2)
+        pago["monto_total"] = round(p["monto_base"] + pago["monto_vacaciones"], 2)
+        pagos_quincenales.append(pago)
 
     auditoria_sin_zona = db.execute(
         "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, s.material, "
@@ -2742,9 +2879,14 @@ def admin_dashboard(user):
         totales_persona_semana=totales_persona_semana,
         totales_actividad_semana=totales_actividad_semana,
         total_semana_kg=total_semana_kg,
-        personas_vacaciones=PERSONAS_VACACIONES,
+        colaboradores=colaboradores,
+        colaboradores_todos=colaboradores_todos,
         resumen_vacaciones=resumen_vacaciones,
         vacaciones_registros=vacaciones_registros,
+        resumen_balance_dias=resumen_balance_dias,
+        balance_dias_movimientos=balance_dias_movimientos,
+        monto_dia_vacaciones=monto_dia_vacaciones,
+        pagos_quincenales=pagos_quincenales,
     )
 
 
@@ -3309,32 +3451,34 @@ def admin_eliminar_productividad(user, productividad_id):
 def admin_nueva_vacacion(user):
     if not user["es_admin_general"]:
         flash("Solo el administrador general puede editar vacaciones.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
-    persona = request.form.get("persona")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    colaborador_id = request.form.get("colaborador_id", type=int)
     fecha_inicio = request.form.get("fecha_inicio", "").strip()
     fecha_fin = request.form.get("fecha_fin", "").strip()
     notas = request.form.get("notas", "").strip() or None
-    if persona not in PERSONAS_VACACIONES:
-        flash("Selecciona el trabajador.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
+    db = get_db()
+    colaborador = db.execute("SELECT id FROM colaboradores WHERE id = ?", (colaborador_id,)).fetchone()
+    if colaborador is None:
+        flash("Selecciona el colaborador.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
     try:
         d_inicio = date.fromisoformat(fecha_inicio)
         d_fin = date.fromisoformat(fecha_fin)
     except ValueError:
         flash("Pon fechas válidas.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
     if d_fin < d_inicio:
         flash("La fecha final no puede ser antes de la fecha de inicio.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
     dias = (d_fin - d_inicio).days + 1
-    db = get_db()
     db.execute(
-        "INSERT INTO vacaciones_registros (persona, fecha_inicio, fecha_fin, dias, notas) VALUES (?, ?, ?, ?, ?)",
-        (persona, fecha_inicio, fecha_fin, dias, notas),
+        "INSERT INTO vacaciones_registros (colaborador_id, fecha_inicio, fecha_fin, dias, notas) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (colaborador_id, fecha_inicio, fecha_fin, dias, notas),
     )
     db.commit()
-    flash(f"Vacaciones registradas para {persona} ({dias} día(s)).", "success")
-    return redirect(url_for("admin_dashboard", tab="vacaciones"))
+    flash(f"Vacaciones registradas ({dias} día(s)).", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
 
 
 @app.route("/admin/vacaciones/<int:vacacion_id>/eliminar", methods=["POST"])
@@ -3342,12 +3486,12 @@ def admin_nueva_vacacion(user):
 def admin_eliminar_vacacion(user, vacacion_id):
     if not user["es_admin_general"]:
         flash("Solo el administrador general puede editar vacaciones.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
     db = get_db()
     db.execute("DELETE FROM vacaciones_registros WHERE id = ?", (vacacion_id,))
     db.commit()
     flash("Registro de vacaciones eliminado.", "success")
-    return redirect(url_for("admin_dashboard", tab="vacaciones"))
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
 
 
 @app.route("/admin/vacaciones/saldo", methods=["POST"])
@@ -3355,29 +3499,186 @@ def admin_eliminar_vacacion(user, vacacion_id):
 def admin_actualizar_saldo_vacaciones(user):
     if not user["es_admin_general"]:
         flash("Solo el administrador general puede editar vacaciones.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
-    persona = request.form.get("persona")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    colaborador_id = request.form.get("colaborador_id", type=int)
     dias_totales = request.form.get("dias_totales", "").strip()
-    if persona not in PERSONAS_VACACIONES:
-        flash("Selecciona el trabajador.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
+    db = get_db()
+    colaborador = db.execute("SELECT id FROM colaboradores WHERE id = ?", (colaborador_id,)).fetchone()
+    if colaborador is None:
+        flash("Selecciona el colaborador.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
     try:
         dias_totales = int(dias_totales)
     except ValueError:
         flash("Pon un número de días válido.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
     if dias_totales < 0:
         flash("Los días no pueden ser negativos.", "error")
-        return redirect(url_for("admin_dashboard", tab="vacaciones"))
-    db = get_db()
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
     db.execute(
-        "INSERT INTO vacaciones_saldo (persona, dias_totales) VALUES (?, ?) "
-        "ON CONFLICT(persona) DO UPDATE SET dias_totales = excluded.dias_totales",
-        (persona, dias_totales),
+        "INSERT INTO vacaciones_saldo (colaborador_id, dias_totales) VALUES (?, ?) "
+        "ON CONFLICT(colaborador_id) DO UPDATE SET dias_totales = excluded.dias_totales",
+        (colaborador_id, dias_totales),
     )
     db.commit()
-    flash(f"Días totales de {persona} actualizados a {dias_totales}.", "success")
-    return redirect(url_for("admin_dashboard", tab="vacaciones"))
+    flash(f"Días totales actualizados a {dias_totales}.", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
+
+
+@app.route("/admin/colaboradores/nuevo", methods=["POST"])
+@login_required("admin")
+def admin_nuevo_colaborador(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar colaboradores.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    nombre = request.form.get("nombre", "").strip()
+    fecha_ingreso = request.form.get("fecha_ingreso", "").strip() or None
+    if not nombre:
+        flash("Escribe el nombre del colaborador.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    db = get_db()
+    db.execute(
+        "INSERT INTO colaboradores (nombre, fecha_ingreso) VALUES (?, ?)", (nombre, fecha_ingreso)
+    )
+    db.commit()
+    flash(f"'{nombre}' agregado como colaborador.", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
+
+
+@app.route("/admin/colaboradores/<int:colaborador_id>/eliminar", methods=["POST"])
+@login_required("admin")
+def admin_eliminar_colaborador(user, colaborador_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar colaboradores.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    db = get_db()
+    colaborador = db.execute("SELECT * FROM colaboradores WHERE id = ?", (colaborador_id,)).fetchone()
+    if colaborador is None:
+        flash("Ese colaborador ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    # Se da de baja (no se borra) para no perder su historial de vacaciones, balance de días y
+    # pagos quincenales ya registrados — solo deja de aparecer para registrar movimientos nuevos.
+    db.execute("UPDATE colaboradores SET activo = 0 WHERE id = ?", (colaborador_id,))
+    db.commit()
+    flash(f"'{colaborador['nombre']}' se dio de baja. Su historial se conserva.", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
+
+
+@app.route("/admin/balance-dias/nuevo", methods=["POST"])
+@login_required("admin")
+def admin_nuevo_movimiento_balance(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar el balance de días.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    colaborador_id = request.form.get("colaborador_id", type=int)
+    fecha = request.form.get("fecha", "").strip()
+    dias = request.form.get("dias", "").strip()
+    motivo = request.form.get("motivo", "").strip() or None
+    db = get_db()
+    colaborador = db.execute("SELECT id FROM colaboradores WHERE id = ?", (colaborador_id,)).fetchone()
+    if colaborador is None:
+        flash("Selecciona el colaborador.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    try:
+        fecha_valida = date.fromisoformat(fecha)
+        dias = int(dias)
+    except ValueError:
+        flash("Pon una fecha y un número de días válidos.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    if dias == 0:
+        flash("Los días no pueden ser 0 — pon un número positivo (trabajó de más) o negativo (debe reponer).", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    db.execute(
+        "INSERT INTO balance_dias_movimientos (colaborador_id, fecha, dias, motivo) VALUES (?, ?, ?, ?)",
+        (colaborador_id, fecha_valida.isoformat(), dias, motivo),
+    )
+    db.commit()
+    flash("Movimiento de balance registrado.", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
+
+
+@app.route("/admin/balance-dias/<int:movimiento_id>/eliminar", methods=["POST"])
+@login_required("admin")
+def admin_eliminar_movimiento_balance(user, movimiento_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar el balance de días.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    db = get_db()
+    db.execute("DELETE FROM balance_dias_movimientos WHERE id = ?", (movimiento_id,))
+    db.commit()
+    flash("Movimiento eliminado.", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
+
+
+@app.route("/admin/pago-quincenal/monto-vacaciones", methods=["POST"])
+@login_required("admin")
+def admin_actualizar_monto_vacaciones(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar el pago quincenal.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    monto = request.form.get("monto_dia_vacaciones", "").strip()
+    try:
+        monto = float(monto)
+    except ValueError:
+        flash("Pon un monto válido.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    if monto < 0:
+        flash("El monto no puede ser negativo.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    db = get_db()
+    db.execute("UPDATE configuracion_pago SET monto_dia_vacaciones = ? WHERE id = 1", (monto,))
+    db.commit()
+    flash(f"Pago por día de vacaciones actualizado a ${monto:,.2f}.", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
+
+
+@app.route("/admin/pago-quincenal/nuevo", methods=["POST"])
+@login_required("admin")
+def admin_nuevo_pago_quincenal(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar el pago quincenal.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    colaborador_id = request.form.get("colaborador_id", type=int)
+    quincena_inicio = request.form.get("quincena_inicio", "").strip()
+    quincena_fin = request.form.get("quincena_fin", "").strip()
+    monto_base = request.form.get("monto_base", "").strip()
+    notas = request.form.get("notas", "").strip() or None
+    db = get_db()
+    colaborador = db.execute("SELECT id FROM colaboradores WHERE id = ?", (colaborador_id,)).fetchone()
+    if colaborador is None:
+        flash("Selecciona el colaborador.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    try:
+        d_inicio = date.fromisoformat(quincena_inicio)
+        d_fin = date.fromisoformat(quincena_fin)
+        monto_base = float(monto_base)
+    except ValueError:
+        flash("Pon fechas y un monto válidos.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    if d_fin < d_inicio:
+        flash("La fecha final no puede ser antes de la fecha de inicio.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    db.execute(
+        "INSERT INTO pagos_quincenales (colaborador_id, quincena_inicio, quincena_fin, monto_base, notas) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (colaborador_id, quincena_inicio, quincena_fin, monto_base, notas),
+    )
+    db.commit()
+    flash("Pago quincenal registrado.", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
+
+
+@app.route("/admin/pago-quincenal/<int:pago_id>/eliminar", methods=["POST"])
+@login_required("admin")
+def admin_eliminar_pago_quincenal(user, pago_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar el pago quincenal.", "error")
+        return redirect(url_for("admin_dashboard", tab="colaboradores"))
+    db = get_db()
+    db.execute("DELETE FROM pagos_quincenales WHERE id = ?", (pago_id,))
+    db.commit()
+    flash("Pago eliminado.", "success")
+    return redirect(url_for("admin_dashboard", tab="colaboradores"))
 
 
 @app.route("/admin/dinero/nuevo", methods=["POST"])

@@ -11,6 +11,10 @@ DROP TABLE IF EXISTS inventario_cajas;
 DROP TABLE IF EXISTS productividad;
 DROP TABLE IF EXISTS vacaciones_registros;
 DROP TABLE IF EXISTS vacaciones_saldo;
+DROP TABLE IF EXISTS balance_dias_movimientos;
+DROP TABLE IF EXISTS pagos_quincenales;
+DROP TABLE IF EXISTS configuracion_pago;
+DROP TABLE IF EXISTS colaboradores;
 DROP TABLE IF EXISTS horas_extra;
 DROP TABLE IF EXISTS avisos_programados;
 DROP TABLE IF EXISTS zonas_referencia;
@@ -116,19 +120,51 @@ CREATE TABLE productividad (
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 
+CREATE TABLE colaboradores (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  fecha_ingreso TEXT,
+  activo INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
 CREATE TABLE vacaciones_saldo (
-  persona TEXT PRIMARY KEY CHECK(persona IN ('Lety','Martin','Gaby','Paola','Monserrat')),
+  colaborador_id INTEGER PRIMARY KEY REFERENCES colaboradores(id),
   dias_totales INTEGER NOT NULL DEFAULT 12
 );
 
 CREATE TABLE vacaciones_registros (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  persona TEXT NOT NULL CHECK(persona IN ('Lety','Martin','Gaby','Paola','Monserrat')),
+  colaborador_id INTEGER NOT NULL REFERENCES colaboradores(id),
   fecha_inicio TEXT NOT NULL,
   fecha_fin TEXT NOT NULL,
   dias INTEGER NOT NULL,
   notas TEXT,
   created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE balance_dias_movimientos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  colaborador_id INTEGER NOT NULL REFERENCES colaboradores(id),
+  fecha TEXT NOT NULL,
+  dias INTEGER NOT NULL,
+  motivo TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE pagos_quincenales (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  colaborador_id INTEGER NOT NULL REFERENCES colaboradores(id),
+  quincena_inicio TEXT NOT NULL,
+  quincena_fin TEXT NOT NULL,
+  monto_base REAL NOT NULL DEFAULT 0,
+  notas TEXT,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE configuracion_pago (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  monto_dia_vacaciones REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE horas_extra (
