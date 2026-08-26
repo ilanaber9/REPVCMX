@@ -341,7 +341,7 @@
       <label>Correo</label>
       <input type="email" name="email" required>
       <label>Contraseña</label>
-      <input type="password" name="password" required minlength="4">
+      <input type="password" name="password" required minlength="8">
       <button type="submit">Crear administrador</button>
     </form>
   </div>
@@ -356,7 +356,7 @@
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
           <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_admin', user_id=r['id']) }}"
                 style="display:flex; gap:6px; align-items:center;">
-            <input type="password" name="password" placeholder="Nueva contraseña" minlength="4" required style="width:150px;">
+            <input type="password" name="password" placeholder="Nueva contraseña" minlength="8" required style="width:150px;">
             <button type="submit" class="small secondary">Restablecer contraseña</button>
           </form>
           <form class="inline" method="post" action="{{ url_for('admin_eliminar_admin', user_id=r['id']) }}"
@@ -380,7 +380,7 @@
       <label>Correo</label>
       <input type="email" name="email" required>
       <label>Contraseña</label>
-      <input type="password" name="password" required minlength="4">
+      <input type="password" name="password" required minlength="8">
       <button type="submit">Crear recolector</button>
     </form>
   </div>
@@ -395,7 +395,7 @@
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
           <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_recolector', user_id=r['id']) }}"
                 style="display:flex; gap:6px; align-items:center;">
-            <input type="password" name="password" placeholder="Nueva contraseña" minlength="4" required style="width:150px;">
+            <input type="password" name="password" placeholder="Nueva contraseña" minlength="8" required style="width:150px;">
             <button type="submit" class="small secondary">Restablecer contraseña</button>
           </form>
           <form class="inline" method="post" action="{{ url_for('admin_eliminar_recolector', user_id=r['id']) }}"
@@ -420,7 +420,7 @@
       <label>Correo</label>
       <input type="email" name="email" required>
       <label>Contraseña</label>
-      <input type="password" name="password" required minlength="4">
+      <input type="password" name="password" required minlength="8">
       <button type="submit">Crear cuenta de NEF</button>
     </form>
   </div>
@@ -435,7 +435,7 @@
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
           <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_nef', user_id=r['id']) }}"
                 style="display:flex; gap:6px; align-items:center;">
-            <input type="password" name="password" placeholder="Nueva contraseña" minlength="4" required style="width:150px;">
+            <input type="password" name="password" placeholder="Nueva contraseña" minlength="8" required style="width:150px;">
             <button type="submit" class="small secondary">Restablecer contraseña</button>
           </form>
           <form class="inline" method="post" action="{{ url_for('admin_eliminar_nef', user_id=r['id']) }}"
@@ -463,7 +463,7 @@
       <label>Correo</label>
       <input type="email" name="email" required>
       <label>Contraseña</label>
-      <input type="password" name="password" required minlength="4">
+      <input type="password" name="password" required minlength="8">
       <button type="submit">Crear administrador general</button>
     </form>
   </div>

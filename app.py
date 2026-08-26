@@ -21,9 +21,9 @@ from math import atan2, cos, radians, sin, sqrt
 from zoneinfo import ZoneInfo
 import urllib.error
 import urllib.request
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
-from flask import Flask, g, jsonify, redirect, render_template, request, session, url_for, flash, send_file
+from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for, flash, send_file
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
@@ -50,7 +50,33 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-cambiar-en-produccion")
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# Solo en Render (identificado por DATABASE_PATH, que nada más se define ahí) — en local no hay
+# HTTPS, y con Secure=True el navegador simplemente no guardaría la cookie de sesión, dejando a
+# cualquiera sin poder iniciar sesión en desarrollo.
+app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("DATABASE_PATH"))
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB por archivo subido
+
+RUTAS_SIN_VALIDACION_ORIGEN = {"webhook_whatsapp"}  # no vienen de un navegador con sesión; el
+# webhook de Twilio ya se valida con su propia firma criptográfica, no con esto.
+
+
+@app.before_request
+def _validar_origen_contra_csrf():
+    """Protección CSRF ligera: en cualquier POST, confirma que la petición salió de este mismo
+    sitio (encabezado Origin, o Referer si el navegador no manda Origin) antes de dejarla pasar
+    — así una página maliciosa en otro dominio no puede aprovechar la sesión ya iniciada de
+    alguien aquí para mandar acciones en su nombre. Si el navegador no manda ninguno de los dos
+    encabezados (pasa en algunos clientes legítimos) se deja pasar, para no bloquear en seco;
+    pero si los manda y no coinciden con este host, se rechaza."""
+    if request.method != "POST" or request.endpoint in RUTAS_SIN_VALIDACION_ORIGEN:
+        return
+    origen = request.headers.get("Origin") or request.headers.get("Referer")
+    if not origen:
+        return
+    origen_host = urlparse(origen).netloc
+    if origen_host and origen_host != request.host:
+        abort(403)
+
 
 NEF_VIDEOS_DIR = os.path.join(BASE_DIR, "static", "videos", "nef")
 NEF_VIDEO_EXTENSIONES = {"mp4", "mov", "webm", "m4v"}
@@ -115,6 +141,7 @@ DIAS_ESPERA_DONACION = 30  # pacientes en modalidad 'donacion': cada cuántos d�
 # programar después de su última recolección (o de entregado el bote, si es la primera).
 DIAS_ESPERA_COMPRA = 60  # pacientes en modalidad 'compra': ídem, pero cada 60 días.
 DIAS_VACACIONES_DEFAULT = 12
+PASSWORD_MIN_LENGTH = 8
 DURACION_MAXIMA_RUTA_MIN = 7 * 60 + 30  # 7:30 hrs por ruta antes de dividirla en otra
 MIN_PARADAS_POR_RUTA = 12  # buscamos que cada ruta traiga al menos este número de pacientes,
 # para juntar más material por día y ser más rentables en vez de mandar camionetas a medio llenar
@@ -1594,11 +1621,46 @@ def aplicar_migraciones_pendientes():
         )
         db.execute("INSERT INTO configuracion_pago (id, monto_dia_vacaciones) VALUES (1, 0)")
 
+    if "intentos_login" not in tablas:
+        db.execute(
+            "CREATE TABLE intentos_login ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  identidad TEXT NOT NULL,"
+            "  exitoso INTEGER NOT NULL,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
+        db.execute("CREATE INDEX idx_intentos_login_identidad ON intentos_login(identidad, created_at)")
+
     db.commit()
     db.close()
 
 
 # ---------- Auth helpers ----------
+
+MAX_INTENTOS_LOGIN = 5
+MINUTOS_BLOQUEO_LOGIN = 15
+
+
+def login_bloqueado(db, identidad):
+    """True si esta identidad (correo o WhatsApp) ya acumuló MAX_INTENTOS_LOGIN intentos
+    fallidos en los últimos MINUTOS_BLOQUEO_LOGIN minutos — protege contra que alguien intente
+    adivinar una contraseña sin límite. La comparación de tiempo se hace toda dentro de SQLite
+    (su propio 'now'), para no depender de en qué zona horaria corre el proceso de Python."""
+    fallidos = db.execute(
+        "SELECT COUNT(*) AS n FROM intentos_login WHERE identidad = ? AND exitoso = 0 "
+        "AND created_at >= datetime('now', 'localtime', ?)",
+        (identidad, f"-{MINUTOS_BLOQUEO_LOGIN} minutes"),
+    ).fetchone()["n"]
+    return fallidos >= MAX_INTENTOS_LOGIN
+
+
+def registrar_intento_login(db, identidad, exitoso):
+    db.execute(
+        "INSERT INTO intentos_login (identidad, exitoso) VALUES (?, ?)", (identidad, 1 if exitoso else 0)
+    )
+    db.commit()
+
 
 def current_user():
     if "user_id" not in session:
@@ -1664,24 +1726,38 @@ def login():
         db = get_db()
         if tipo == "cliente":
             telefono = telefono_identidad(request.form.get("telefono", ""))
+            identidad = telefono or request.form.get("telefono", "").strip()
+        else:
+            identidad = request.form.get("email", "").strip().lower()
+        if login_bloqueado(db, identidad):
+            flash(
+                f"Demasiados intentos fallidos. Espera {MINUTOS_BLOQUEO_LOGIN} minutos antes de "
+                "volver a intentar, o pide que te restablezcan la contraseña.",
+                "error",
+            )
+            return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
+        if tipo == "cliente":
             user = db.execute(
                 "SELECT * FROM users WHERE telefono = ? AND role = 'cliente'", (telefono,)
             ).fetchone()
             error_no_existe = "Ese número de WhatsApp no está registrado."
         else:
-            email = request.form["email"].strip().lower()
-            user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+            user = db.execute("SELECT * FROM users WHERE email = ?", (identidad,)).fetchone()
             error_no_existe = "Este correo no está registrado."
         if user is None:
+            registrar_intento_login(db, identidad, exitoso=False)
             flash(error_no_existe, "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         if not check_password_hash(user["password_hash"], password):
+            registrar_intento_login(db, identidad, exitoso=False)
             error_password = "Número de WhatsApp o contraseña incorrectos." if tipo == "cliente" else "Correo o contraseña incorrectos."
             flash(error_password, "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         if tipo and TIPO_LOGIN_ROLES.get(tipo) != user["role"]:
+            registrar_intento_login(db, identidad, exitoso=False)
             flash(f"Esa cuenta no es de {TIPO_LOGIN_LABELS.get(tipo, tipo)}.", "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
+        registrar_intento_login(db, identidad, exitoso=True)
         session.clear()
         session["user_id"] = user["id"]
         return redirect(url_for("home"))
@@ -1761,8 +1837,8 @@ def restablecer_password(token):
     if request.method == "POST":
         password = request.form.get("password", "")
         password2 = request.form.get("password2", "")
-        if len(password) < 6:
-            flash("La contraseña debe tener al menos 6 caracteres.", "error")
+        if len(password) < PASSWORD_MIN_LENGTH:
+            flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
             return render_template("restablecer_password.html", token=token)
         if password != password2:
             flash("Las contraseñas no coinciden.", "error")
@@ -1957,6 +2033,9 @@ def registro():
         password = request.form["password"]
         if telefono is None:
             flash("Escribe un número de WhatsApp válido de 10 dígitos.", "error")
+            return render_template("registro.html")
+        if len(password) < PASSWORD_MIN_LENGTH:
+            flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
             return render_template("registro.html")
         db = get_db()
         existing = db.execute("SELECT id FROM users WHERE telefono = ?", (telefono,)).fetchone()
@@ -2984,8 +3063,8 @@ def invitacion_paciente(token):
     if request.method == "POST":
         password = request.form.get("password", "")
         password2 = request.form.get("password2", "")
-        if len(password) < 6:
-            flash("La contraseña debe tener al menos 6 caracteres.", "error")
+        if len(password) < PASSWORD_MIN_LENGTH:
+            flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
             return render_template("invitacion_paciente.html", token=token, nombre=user["name"])
         if password != password2:
             flash("Las contraseñas no coinciden.", "error")
@@ -4093,6 +4172,9 @@ def admin_nuevo_admin(user):
     name = request.form["name"].strip()
     email = request.form["email"].strip().lower()
     password = request.form["password"]
+    if len(password) < PASSWORD_MIN_LENGTH:
+        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db = get_db()
     existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
     if existing:
@@ -4140,8 +4222,8 @@ def admin_restablecer_password_admin(user, user_id):
         flash("Esa cuenta ya no existe.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
     password = request.form.get("password", "")
-    if len(password) < 4:
-        flash("La contraseña debe tener al menos 4 caracteres.", "error")
+    if len(password) < PASSWORD_MIN_LENGTH:
+        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
     db.execute(
         "UPDATE users SET password_hash = ? WHERE id = ?",
@@ -4161,6 +4243,9 @@ def admin_nuevo_recolector(user):
     name = request.form["name"].strip()
     email = request.form["email"].strip().lower()
     password = request.form["password"]
+    if len(password) < PASSWORD_MIN_LENGTH:
+        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db = get_db()
     existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
     if existing:
@@ -4215,8 +4300,8 @@ def admin_restablecer_password_recolector(user, user_id):
         flash("Ese recolector ya no existe.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
     password = request.form.get("password", "")
-    if len(password) < 4:
-        flash("La contraseña debe tener al menos 4 caracteres.", "error")
+    if len(password) < PASSWORD_MIN_LENGTH:
+        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
     db.execute(
         "UPDATE users SET password_hash = ? WHERE id = ?",
@@ -4236,6 +4321,9 @@ def admin_nuevo_nef(user):
     name = request.form["name"].strip()
     email = request.form["email"].strip().lower()
     password = request.form["password"]
+    if len(password) < PASSWORD_MIN_LENGTH:
+        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db = get_db()
     existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
     if existing:
@@ -4279,8 +4367,8 @@ def admin_restablecer_password_nef(user, user_id):
         flash("Esa cuenta de NEF ya no existe.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
     password = request.form.get("password", "")
-    if len(password) < 4:
-        flash("La contraseña debe tener al menos 4 caracteres.", "error")
+    if len(password) < PASSWORD_MIN_LENGTH:
+        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
     db.execute(
         "UPDATE users SET password_hash = ? WHERE id = ?",
@@ -4300,6 +4388,9 @@ def admin_nuevo_admin_general(user):
     name = request.form["name"].strip()
     email = request.form["email"].strip().lower()
     password = request.form["password"]
+    if len(password) < PASSWORD_MIN_LENGTH:
+        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db = get_db()
     existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
     if existing:

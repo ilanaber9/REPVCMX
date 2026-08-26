@@ -15,6 +15,7 @@ DROP TABLE IF EXISTS balance_dias_movimientos;
 DROP TABLE IF EXISTS pagos_quincenales;
 DROP TABLE IF EXISTS configuracion_pago;
 DROP TABLE IF EXISTS colaboradores;
+DROP TABLE IF EXISTS intentos_login;
 DROP TABLE IF EXISTS horas_extra;
 DROP TABLE IF EXISTS avisos_programados;
 DROP TABLE IF EXISTS zonas_referencia;
@@ -166,6 +167,14 @@ CREATE TABLE configuracion_pago (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   monto_dia_vacaciones REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE intentos_login (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  identidad TEXT NOT NULL,
+  exitoso INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX idx_intentos_login_identidad ON intentos_login(identidad, created_at);
 
 CREATE TABLE horas_extra (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
