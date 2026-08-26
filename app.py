@@ -1,4 +1,5 @@
 import base64
+import gzip
 import hashlib
 import hmac
 import io
@@ -11,10 +12,14 @@ import smtplib
 import socket
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time as time_module
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
+from email import encoders
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
 from math import atan2, cos, radians, sin, sqrt
@@ -885,6 +890,118 @@ def enviar_email(destinatario, asunto, cuerpo):
         socket.getaddrinfo = getaddrinfo_original
 
 
+def enviar_email_con_adjunto(destinatario, asunto, cuerpo, nombre_archivo, contenido_bytes):
+    """Como enviar_email(), pero con un archivo adjunto — se usa para mandar los respaldos de la
+    base de datos por correo."""
+    remitente = os.environ.get("SMTP_EMAIL")
+    clave = os.environ.get("SMTP_APP_PASSWORD")
+    if not remitente or not clave:
+        print("[enviar_email_con_adjunto] SMTP_EMAIL/SMTP_APP_PASSWORD no están configurados — no se envió el correo.")
+        return False
+    msg = MIMEMultipart()
+    msg["Subject"] = asunto
+    msg["From"] = remitente
+    msg["To"] = destinatario
+    msg.attach(MIMEText(cuerpo))
+    adjunto = MIMEBase("application", "octet-stream")
+    adjunto.set_payload(contenido_bytes)
+    encoders.encode_base64(adjunto)
+    adjunto.add_header("Content-Disposition", f'attachment; filename="{nombre_archivo}"')
+    msg.attach(adjunto)
+
+    getaddrinfo_original = socket.getaddrinfo
+
+    def _getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
+        return getaddrinfo_original(host, port, socket.AF_INET, type, proto, flags)
+
+    try:
+        socket.getaddrinfo = _getaddrinfo_ipv4
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as server:
+            server.login(remitente, clave)
+            server.sendmail(remitente, [destinatario], msg.as_string())
+        return True
+    except Exception as e:
+        print(f"[enviar_email_con_adjunto] Falló el envío a {destinatario}: {e}")
+        return False
+    finally:
+        socket.getaddrinfo = getaddrinfo_original
+
+
+def crear_respaldo_bd():
+    """Crea una copia consistente de la base de datos con la API de respaldo de SQLite (segura
+    aunque haya escrituras en curso en ese momento, a diferencia de copiar el archivo tal cual) y
+    la comprime en gzip para que quepa cómodo como adjunto de correo. Devuelve
+    (nombre_de_archivo, contenido_en_bytes_comprimido)."""
+    ruta_temporal = os.path.join(tempfile.gettempdir(), f"respaldo_temp_{secrets.token_hex(8)}.db")
+    origen = sqlite3.connect(DB_PATH)
+    destino = sqlite3.connect(ruta_temporal)
+    try:
+        origen.backup(destino)
+    finally:
+        destino.close()
+        origen.close()
+    with open(ruta_temporal, "rb") as f:
+        contenido_sin_comprimir = f.read()
+    os.remove(ruta_temporal)
+    nombre_archivo = f"respaldo_repvc_{date.today().isoformat()}.db.gz"
+    return nombre_archivo, gzip.compress(contenido_sin_comprimir)
+
+
+INTERVALO_RESPALDO_HORAS = 24
+
+
+def hace_falta_respaldo(db):
+    ultimo = db.execute(
+        "SELECT created_at FROM respaldos_bd WHERE exitoso = 1 ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    if ultimo is None:
+        return True
+    limite = db.execute(
+        "SELECT datetime('now', 'localtime', ?) AS limite", (f"-{INTERVALO_RESPALDO_HORAS} hours",)
+    ).fetchone()["limite"]
+    return ultimo["created_at"] < limite
+
+
+def hacer_respaldo_y_enviar():
+    """Manda un respaldo por correo si ya pasó INTERVALO_RESPALDO_HORAS desde el último exitoso.
+    Corre desde _hilo_respaldo_diario(), que se revisa cada hora — así, si el servidor se
+    reinicia justo antes de que tocara, se pone al corriente solo en la siguiente revisión en vez
+    de saltarse un día completo."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        if not hace_falta_respaldo(conn):
+            return
+        nombre_archivo, contenido = crear_respaldo_bd()
+        destinatario = os.environ.get("BACKUP_EMAIL", "repvcmx@gmail.com")
+        exitoso = enviar_email_con_adjunto(
+            destinatario,
+            f"Respaldo de RE-PVC — {date.today().isoformat()}",
+            "Respaldo automático diario de la base de datos de RE-PVC, adjunto y comprimido "
+            "(.db.gz). Contiene información real de pacientes — trata este correo con el mismo "
+            "cuidado que el resto del sistema.",
+            nombre_archivo, contenido,
+        )
+        conn.execute(
+            "INSERT INTO respaldos_bd (exitoso, destinatario) VALUES (?, ?)",
+            (1 if exitoso else 0, destinatario),
+        )
+        conn.commit()
+        if not exitoso:
+            print("[respaldo_diario] Falló el envío del respaldo por correo.")
+    finally:
+        conn.close()
+
+
+def _hilo_respaldo_diario():
+    while True:
+        try:
+            hacer_respaldo_y_enviar()
+        except Exception as e:
+            print(f"[respaldo_diario] error: {e}")
+        time_module.sleep(3600)
+
+
 def enviar_whatsapp(destinatario, cuerpo):
     """Envía un WhatsApp por la API REST de Twilio usando las credenciales de .env.
     `destinatario` es el número en formato E.164 (ej. "+525512345678"), sin el prefijo "whatsapp:".
@@ -1631,6 +1748,16 @@ def aplicar_migraciones_pendientes():
             ")"
         )
         db.execute("CREATE INDEX idx_intentos_login_identidad ON intentos_login(identidad, created_at)")
+
+    if "respaldos_bd" not in tablas:
+        db.execute(
+            "CREATE TABLE respaldos_bd ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  exitoso INTEGER NOT NULL,"
+            "  destinatario TEXT,"
+            "  created_at TEXT DEFAULT (datetime('now','localtime'))"
+            ")"
+        )
 
     db.commit()
     db.close()
@@ -2905,6 +3032,10 @@ def admin_dashboard(user):
         "WHERE nombre_contacto LIKE 'Prueba %' ORDER BY id"
     ).fetchall()
 
+    ultimo_respaldo = db.execute(
+        "SELECT * FROM respaldos_bd WHERE exitoso = 1 ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+
     return render_template(
         "admin_dashboard.html",
         pendientes=solicitudes_clientes,
@@ -2914,6 +3045,8 @@ def admin_dashboard(user):
         auditoria_programada_sin_ruta=auditoria_programada_sin_ruta,
         total_auditoria_rutas=total_auditoria_rutas,
         pacientes_prueba=pacientes_prueba,
+        ultimo_respaldo=ultimo_respaldo,
+        correo_respaldo=os.environ.get("BACKUP_EMAIL", "repvcmx@gmail.com"),
         zonas=zonas,
         zona_actual=zona_actual,
         puntos_zona=puntos_zona,
@@ -4581,6 +4714,19 @@ def admin_eliminar_pacientes_prueba(user):
 
 # ---------- Reportes (Excel) ----------
 
+@app.route("/admin/respaldo/descargar")
+@login_required("admin")
+def admin_descargar_respaldo(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede descargar respaldos.", "error")
+        return redirect(url_for("admin_dashboard", tab="reportes"))
+    nombre_archivo, contenido = crear_respaldo_bd()
+    return send_file(
+        io.BytesIO(contenido), as_attachment=True, download_name=nombre_archivo,
+        mimetype="application/gzip",
+    )
+
+
 @app.route("/admin/reportes/pacientes.xlsx")
 @login_required("admin")
 def admin_exportar_pacientes(user):
@@ -5471,6 +5617,7 @@ def webhook_whatsapp():
 
 init_db()
 threading.Thread(target=_hilo_avisos_programados, daemon=True).start()
+threading.Thread(target=_hilo_respaldo_diario, daemon=True).start()
 
 if __name__ == "__main__":
     debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
