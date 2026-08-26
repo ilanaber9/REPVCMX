@@ -28,7 +28,7 @@
 </div>
 
 <script>
-const puntos = {{ puntos_json | safe }};
+const puntos = {{ puntos_json | tojson }};
 const colores = {pendiente: '#a0630a', pendiente_entrega: '#6d28d9', programada: '#1d4ed8', recolectada: '#1f7a4d', incidencia: '#b3261e'};
 
 const map = L.map('mapa');

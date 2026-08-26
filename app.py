@@ -3070,7 +3070,7 @@ def admin_mapa(user):
         "WHERE s.lat IS NOT NULL AND s.lon IS NOT NULL AND s.estado != 'cancelada' "
         "ORDER BY s.zona, s.id"
     ).fetchall()
-    puntos_json = json.dumps([dict(p) for p in puntos])
+    puntos_json = [dict(p) for p in puntos]
     return render_template("admin_mapa.html", puntos=puntos, puntos_json=puntos_json)
 
 
@@ -3086,7 +3086,7 @@ def admin_zona_mapa(user, zona):
         "ORDER BY COALESCE(s.fecha_reinicio_espera, s.created_at)",
         (zona,),
     ).fetchall()
-    puntos_json = json.dumps([dict(p) for p in puntos])
+    puntos_json = [dict(p) for p in puntos]
     estimado = estimar_ruta(puntos)
     return render_template(
         "admin_zona_mapa.html", zona=zona, puntos=puntos, puntos_json=puntos_json, estimado=estimado
@@ -3943,7 +3943,7 @@ def admin_ver_ruta(user, ruta_id):
         "LEFT JOIN users u ON u.id = s.cliente_id WHERE p.ruta_id = ? ORDER BY p.orden",
         (ruta_id,),
     ).fetchall()
-    paradas_json = json.dumps([dict(p) for p in paradas])
+    paradas_json = [dict(p) for p in paradas]
     estimado = estimar_ruta(paradas)
     tiempo_real = None
     if ruta["hora_inicio_real"]:
@@ -4760,7 +4760,7 @@ def recolector_ver_ruta(user, ruta_id):
         "LEFT JOIN users u ON u.id = s.cliente_id WHERE p.ruta_id = ? ORDER BY p.orden",
         (ruta_id,),
     ).fetchall()
-    paradas_json = json.dumps([dict(p) for p in paradas])
+    paradas_json = [dict(p) for p in paradas]
     estimado = estimar_ruta(paradas)
     tiempo_real = None
     if ruta["hora_inicio_real"]:

@@ -49,7 +49,7 @@
 </div>
 
 <script>
-const puntos = {{ puntos_json | safe }};
+const puntos = {{ puntos_json | tojson }};
 const map = L.map('mapa');
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19

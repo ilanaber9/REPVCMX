@@ -208,7 +208,7 @@
 
 
 <script>
-const puntos = {{ paradas_json | safe }};
+const puntos = {{ paradas_json | tojson }};
 const map = L.map('mapa');
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
