@@ -1930,7 +1930,7 @@ def olvide_password():
                 enviar_whatsapp_primer_contacto(
                     telefono_whatsapp_e164(user["telefono"]),
                     "TWILIO_TEMPLATE_RESET_PASSWORD_SID",
-                    {"1": user["name"], "2": link},
+                    {"1": user["name"], "2": token},
                     cuerpo,
                 )
             else:
@@ -3163,7 +3163,7 @@ def admin_invitar_paciente(user):
     enviado = enviar_whatsapp_primer_contacto(
         telefono_whatsapp_e164(telefono),
         "TWILIO_TEMPLATE_INVITACION_SID",
-        {"1": nombre, "2": link},
+        {"1": nombre, "2": token},
         f"Hola {nombre},\n\nTe dimos de alta en RE-PVC para que puedas programar tus recolecciones "
         f"de material PVC desde la app. Entra a este enlace para crear tu contraseña y activar tu "
         f"cuenta:\n{link}\n\nAhí mismo vas a poder completar tu perfil y tu dirección de recolección.\n\n"
