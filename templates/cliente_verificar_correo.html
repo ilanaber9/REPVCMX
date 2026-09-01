@@ -4,11 +4,16 @@
 <div class="card auth-card" style="text-align:center;">
   <h1>Verifica tu cuenta</h1>
   <p style="color:var(--muted); font-size:0.9rem;">
-    Te mandamos un enlace de verificación por WhatsApp al <strong>+52 {{ current_user['telefono'] }}</strong>. Ábrelo desde WhatsApp
-    para continuar con tu registro.
+    Te mandamos un código de 6 dígitos por WhatsApp al <strong>+52 {{ current_user['telefono'] }}</strong>. Escríbelo
+    aquí para continuar con tu registro.
   </p>
-  <form method="post">
-    <button type="submit" class="secondary">Reenviar mensaje de verificación</button>
+  <form method="post" style="text-align:left;">
+    <label>Código de verificación</label>
+    <input type="text" name="codigo" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required autofocus>
+    <button type="submit">Verificar cuenta</button>
+  </form>
+  <form method="post" style="margin-top:8px;">
+    <button type="submit" class="secondary">Reenviar código</button>
   </form>
   <p style="margin-top:16px; font-size:0.85rem;">
     <a href="{{ url_for('logout') }}">Salir</a>

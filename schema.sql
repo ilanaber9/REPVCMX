@@ -39,6 +39,7 @@ CREATE TABLE users (
   reset_token_expira TEXT,
   email_verificado INTEGER NOT NULL DEFAULT 1,
   verificacion_token TEXT,
+  verificacion_token_expira TEXT,
   perfil_completo INTEGER NOT NULL DEFAULT 0,
   alta_completa INTEGER NOT NULL DEFAULT 0,
   terminos_aceptados INTEGER NOT NULL DEFAULT 0,

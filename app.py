@@ -147,6 +147,14 @@ DIAS_ESPERA_DONACION = 30  # pacientes en modalidad 'donacion': cada cuántos d�
 DIAS_ESPERA_COMPRA = 60  # pacientes en modalidad 'compra': ídem, pero cada 60 días.
 DIAS_VACACIONES_DEFAULT = 12
 PASSWORD_MIN_LENGTH = 8
+MINUTOS_VIGENCIA_CODIGO = 15  # los pacientes solo tienen WhatsApp (no correo), y WhatsApp exige
+# que estos avisos (verificar cuenta, restablecer contraseña) usen su categoría AUTHENTICATION,
+# la cual solo permite mandar un código corto (no un link) — por eso este flujo es de código, no
+# de link, a diferencia del de admin/recolector/nef que sí tienen correo.
+
+
+def generar_codigo_verificacion():
+    return f"{secrets.randbelow(1000000):06d}"
 DURACION_MAXIMA_RUTA_MIN = 7 * 60 + 30  # 7:30 hrs por ruta antes de dividirla en otra
 MIN_PARADAS_POR_RUTA = 12  # buscamos que cada ruta traiga al menos este número de pacientes,
 # para juntar más material por día y ser más rentables en vez de mandar camionetas a medio llenar
@@ -1080,7 +1088,7 @@ def enviar_whatsapp_template(destinatario, content_sid, content_variables=None):
 def enviar_whatsapp_primer_contacto(destinatario, content_sid_env, content_variables, cuerpo_libre):
     """Manda el primer mensaje de una conversación de WhatsApp (uno que el negocio inicia, sin que
     el paciente haya escrito antes): si ya hay una plantilla aprobada configurada en .env
-    (content_sid_env, p. ej. "TWILIO_TEMPLATE_VERIFICACION_SID"), la usa —obligatorio fuera del
+    (content_sid_env, p. ej. "TWILIO_TEMPLATE_CODIGO_VERIFICACION_SID"), la usa —obligatorio fuera del
     sandbox para escribirle primero a alguien—; si no está configurada, cae al texto libre de
     siempre, que es lo único que hace falta mientras se sigue probando en el sandbox (ahí no hay
     restricción de plantillas). Así el código no necesita tocarse de nuevo: en cuanto se registre
@@ -1592,6 +1600,7 @@ def aplicar_migraciones_pendientes():
         ("telefono", "TEXT"),
         ("es_admin_general", "INTEGER NOT NULL DEFAULT 0"),
         ("nef_ultima_vista", "TEXT"),
+        ("verificacion_token_expira", "TEXT"),
     ]:
         if columna not in columnas_users:
             db.execute(f"ALTER TABLE users ADD COLUMN {columna} {definicion}")
@@ -1911,7 +1920,24 @@ def olvide_password():
         else:
             email = request.form.get("email", "").strip().lower()
             user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        if user:
+        if user and tipo == "cliente":
+            # Categoría AUTHENTICATION de WhatsApp (obligatoria para este tipo de aviso) solo
+            # permite mandar un código, nunca un link — por eso el paciente escribe el código
+            # aquí en vez de dar clic, a diferencia de admin/recolector/nef que sí tienen correo.
+            codigo = generar_codigo_verificacion()
+            expira = (datetime.now() + timedelta(minutes=MINUTOS_VIGENCIA_CODIGO)).strftime("%Y-%m-%d %H:%M:%S")
+            db.execute(
+                "UPDATE users SET reset_token = ?, reset_token_expira = ? WHERE id = ?",
+                (codigo, expira, user["id"]),
+            )
+            db.commit()
+            enviar_whatsapp_primer_contacto(
+                telefono_whatsapp_e164(user["telefono"]),
+                "TWILIO_TEMPLATE_CODIGO_VERIFICACION_SID",
+                {"1": codigo},
+                f"Hola {user['name']},\n\nTu código para restablecer tu contraseña en RE-PVC es: {codigo}",
+            )
+        elif user:
             token = secrets.token_urlsafe(32)
             expira = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
             db.execute(
@@ -1926,21 +1952,11 @@ def olvide_password():
                 f"Entra a este enlace para poner una nueva (válido por 1 hora):\n{link}\n\n"
                 "Si tú no pediste esto, ignora este mensaje."
             )
-            if tipo == "cliente":
-                enviar_whatsapp_primer_contacto(
-                    telefono_whatsapp_e164(user["telefono"]),
-                    "TWILIO_TEMPLATE_RESET_PASSWORD_SID",
-                    {"1": user["name"], "2": token},
-                    cuerpo,
-                )
-            else:
-                enviar_email(user["email"], "Recuperar contraseña — RE-PVC", cuerpo)
-        mensaje = (
-            "Si ese número de WhatsApp está registrado, te enviamos un enlace para restablecer tu contraseña."
-            if tipo == "cliente"
-            else "Si ese correo está registrado, te enviamos un enlace para restablecer tu contraseña."
-        )
-        flash(mensaje, "success")
+            enviar_email(user["email"], "Recuperar contraseña — RE-PVC", cuerpo)
+        if tipo == "cliente":
+            flash("Si ese número de WhatsApp está registrado, te enviamos un código para restablecer tu contraseña.", "success")
+            return redirect(url_for("restablecer_password_codigo", telefono=request.form.get("telefono", "")))
+        flash("Si ese correo está registrado, te enviamos un enlace para restablecer tu contraseña.", "success")
         return redirect(url_for("login", tipo=tipo))
     tipo = request.args.get("tipo") or None
     return render_template("olvide_password.html", tipo=tipo)
@@ -1978,6 +1994,45 @@ def restablecer_password(token):
         flash("Contraseña actualizada. Ya puedes iniciar sesión.", "success")
         return redirect(url_for("login"))
     return render_template("restablecer_password.html", token=token)
+
+
+@app.route("/restablecer-password-codigo", methods=["GET", "POST"])
+def restablecer_password_codigo():
+    """Variante para pacientes (solo tienen WhatsApp, no correo) del restablecimiento de
+    contraseña — código en vez de link, por la misma razón que verificar_cuenta()."""
+    if request.method == "POST":
+        telefono = telefono_identidad(request.form.get("telefono", ""))
+        codigo = request.form.get("codigo", "").strip()
+        password = request.form.get("password", "")
+        password2 = request.form.get("password2", "")
+        db = get_db()
+        user = db.execute(
+            "SELECT * FROM users WHERE telefono = ? AND role = 'cliente'", (telefono,)
+        ).fetchone()
+        valido = user is not None and user["reset_token"] == codigo and codigo != ""
+        if valido and user["reset_token_expira"]:
+            try:
+                expira = datetime.strptime(user["reset_token_expira"], "%Y-%m-%d %H:%M:%S")
+                valido = datetime.now() <= expira
+            except ValueError:
+                valido = False
+        if not valido:
+            flash("Ese código no es válido o ya expiró. Solicita uno nuevo.", "error")
+            return render_template("restablecer_password_codigo.html", telefono=request.form.get("telefono", ""))
+        if len(password) < PASSWORD_MIN_LENGTH:
+            flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
+            return render_template("restablecer_password_codigo.html", telefono=request.form.get("telefono", ""))
+        if password != password2:
+            flash("Las contraseñas no coinciden.", "error")
+            return render_template("restablecer_password_codigo.html", telefono=request.form.get("telefono", ""))
+        db.execute(
+            "UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expira = NULL WHERE id = ?",
+            (generate_password_hash(password, method="pbkdf2:sha256"), user["id"]),
+        )
+        db.commit()
+        flash("Contraseña actualizada. Ya puedes iniciar sesión.", "success")
+        return redirect(url_for("login", tipo="cliente"))
+    return render_template("restablecer_password_codigo.html", telefono=request.args.get("telefono", ""))
 
 
 def marcar_parada_ausente_por_rechazo(db, parada_id):
@@ -2169,58 +2224,66 @@ def registro():
         if existing:
             flash("Ese número de WhatsApp ya está registrado.", "error")
             return render_template("registro.html")
-        token = secrets.token_urlsafe(32)
+        codigo = generar_codigo_verificacion()
+        expira = (datetime.now() + timedelta(minutes=MINUTOS_VIGENCIA_CODIGO)).strftime("%Y-%m-%d %H:%M:%S")
         db.execute(
-            "INSERT INTO users (name, telefono, password_hash, role, email_verificado, verificacion_token) "
-            "VALUES (?, ?, ?, 'cliente', 0, ?)",
-            (name, telefono, generate_password_hash(password, method="pbkdf2:sha256"), token),
+            "INSERT INTO users (name, telefono, password_hash, role, email_verificado, "
+            "verificacion_token, verificacion_token_expira) VALUES (?, ?, ?, 'cliente', 0, ?, ?)",
+            (name, telefono, generate_password_hash(password, method="pbkdf2:sha256"), codigo, expira),
         )
         db.commit()
-        link = url_absoluta("verificar_correo", token=token)
         enviado = enviar_whatsapp_primer_contacto(
             telefono_whatsapp_e164(telefono),
-            "TWILIO_TEMPLATE_VERIFICACION_SID",
-            {"1": name, "2": link},
-            f"Hola {name},\n\nGracias por registrarte en RE-PVC. Confirma tu cuenta entrando a este enlace:\n{link}\n\n"
+            "TWILIO_TEMPLATE_CODIGO_VERIFICACION_SID",
+            {"1": codigo},
+            f"Hola {name},\n\nGracias por registrarte en RE-PVC. Tu código de verificación es: {codigo}\n\n"
             "Si tú no creaste esta cuenta, ignora este mensaje.",
         )
         if enviado:
-            flash("Cuenta creada. Revisa tu WhatsApp para verificarla antes de continuar.", "success")
+            flash("Cuenta creada. Escribe el código que te mandamos por WhatsApp para verificarla.", "success")
         else:
             flash(
-                "Cuenta creada, pero no pudimos enviarte el mensaje de verificación en este momento. "
-                "Inicia sesión y usa la opción de reenviar el mensaje desde tu cuenta.",
+                "Cuenta creada, pero no pudimos enviarte el código de verificación en este momento. "
+                "Inicia sesión y usa la opción de reenviar el código desde tu cuenta.",
                 "error",
             )
-        return redirect(url_for("login", tipo="cliente"))
+        return redirect(url_for("verificar_cuenta", telefono=telefono))
     return render_template("registro.html")
 
 
-@app.route("/verificar-correo/<token>", methods=["GET", "POST"])
-def verificar_correo(token):
-    """El GET solo muestra la página con el botón de confirmar, sin tocar la base de datos —
-    WhatsApp manda un robot (facebookexternalhit) a precargar el link para armar la vista previa
-    en cuanto se envía el mensaje, antes de que la persona lo abra. Si el GET ya consumiera el
-    token (como antes), el robot lo gastaba primero y el paciente se encontraba el enlace
-    'inválido' segundos después. Por eso la acción real solo pasa en el POST, que solo dispara un
-    clic humano en el botón, nunca el robot de vista previa."""
-    db = get_db()
-    user = db.execute("SELECT * FROM users WHERE verificacion_token = ?", (token,)).fetchone()
-    if user is None:
-        if request.method == "GET":
-            return render_template("verificar_correo.html", valido=False)
-        flash("Ese enlace de verificación ya no es válido.", "error")
-        return redirect(url_for("login"))
-    if request.method == "GET":
-        return render_template("verificar_correo.html", valido=True, nombre=user["name"])
-    db.execute(
-        "UPDATE users SET email_verificado = 1, verificacion_token = NULL WHERE id = ?", (user["id"],)
-    )
-    db.commit()
-    flash("¡Cuenta verificada! Ya puedes continuar.", "success")
-    session.clear()
-    session["user_id"] = user["id"]
-    return redirect(url_for("home"))
+@app.route("/verificar-cuenta", methods=["GET", "POST"])
+def verificar_cuenta():
+    """Reemplaza el flujo anterior de link (verificar_correo/<token>) — WhatsApp exige categoría
+    AUTHENTICATION para este tipo de aviso, y esa categoría solo permite mandar un código corto,
+    nunca un link. Por eso el paciente escribe su teléfono y el código aquí en vez de dar clic."""
+    if request.method == "POST":
+        telefono = telefono_identidad(request.form.get("telefono", ""))
+        codigo = request.form.get("codigo", "").strip()
+        db = get_db()
+        user = db.execute(
+            "SELECT * FROM users WHERE telefono = ? AND role = 'cliente'", (telefono,)
+        ).fetchone()
+        valido = user is not None and user["verificacion_token"] == codigo and codigo != ""
+        if valido and user["verificacion_token_expira"]:
+            try:
+                expira = datetime.strptime(user["verificacion_token_expira"], "%Y-%m-%d %H:%M:%S")
+                valido = datetime.now() <= expira
+            except ValueError:
+                valido = False
+        if not valido:
+            flash("Ese código no es válido o ya expiró. Pide que te manden uno nuevo.", "error")
+            return render_template("verificar_cuenta.html", telefono=request.form.get("telefono", ""))
+        db.execute(
+            "UPDATE users SET email_verificado = 1, verificacion_token = NULL, "
+            "verificacion_token_expira = NULL WHERE id = ?",
+            (user["id"],),
+        )
+        db.commit()
+        flash("¡Cuenta verificada! Ya puedes continuar.", "success")
+        session.clear()
+        session["user_id"] = user["id"]
+        return redirect(url_for("home"))
+    return render_template("verificar_cuenta.html", telefono=request.args.get("telefono", ""))
 
 
 # ---------- Cliente ----------
@@ -2230,22 +2293,45 @@ def verificar_correo(token):
 def cliente_verificar_correo(user):
     if user["email_verificado"]:
         return redirect(url_for("home"))
+    db = get_db()
     if request.method == "POST":
-        token = secrets.token_urlsafe(32)
-        db = get_db()
-        db.execute("UPDATE users SET verificacion_token = ? WHERE id = ?", (token, user["id"]))
-        db.commit()
-        link = url_absoluta("verificar_correo", token=token)
-        enviado = enviar_whatsapp_primer_contacto(
-            telefono_whatsapp_e164(user["telefono"]),
-            "TWILIO_TEMPLATE_VERIFICACION_SID",
-            {"1": user["name"], "2": link},
-            f"Hola {user['name']},\n\nConfirma tu cuenta entrando a este enlace:\n{link}",
-        )
-        if enviado:
-            flash("Te reenviamos el mensaje de verificación por WhatsApp.", "success")
+        if "codigo" in request.form:
+            codigo = request.form.get("codigo", "").strip()
+            valido = user["verificacion_token"] == codigo and codigo != ""
+            if valido and user["verificacion_token_expira"]:
+                try:
+                    expira = datetime.strptime(user["verificacion_token_expira"], "%Y-%m-%d %H:%M:%S")
+                    valido = datetime.now() <= expira
+                except ValueError:
+                    valido = False
+            if valido:
+                db.execute(
+                    "UPDATE users SET email_verificado = 1, verificacion_token = NULL, "
+                    "verificacion_token_expira = NULL WHERE id = ?",
+                    (user["id"],),
+                )
+                db.commit()
+                flash("¡Cuenta verificada!", "success")
+                return redirect(url_for("home"))
+            flash("Ese código no es válido o ya expiró.", "error")
         else:
-            flash("No pudimos enviar el mensaje en este momento. Intenta de nuevo en unos minutos.", "error")
+            codigo = generar_codigo_verificacion()
+            expira = (datetime.now() + timedelta(minutes=MINUTOS_VIGENCIA_CODIGO)).strftime("%Y-%m-%d %H:%M:%S")
+            db.execute(
+                "UPDATE users SET verificacion_token = ?, verificacion_token_expira = ? WHERE id = ?",
+                (codigo, expira, user["id"]),
+            )
+            db.commit()
+            enviado = enviar_whatsapp_primer_contacto(
+                telefono_whatsapp_e164(user["telefono"]),
+                "TWILIO_TEMPLATE_CODIGO_VERIFICACION_SID",
+                {"1": codigo},
+                f"Hola {user['name']},\n\nTu código de verificación es: {codigo}",
+            )
+            if enviado:
+                flash("Te reenviamos el código de verificación por WhatsApp.", "success")
+            else:
+                flash("No pudimos enviar el código en este momento. Intenta de nuevo en unos minutos.", "error")
     return render_template("cliente_verificar_correo.html")
 
 

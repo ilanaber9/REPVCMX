@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Verifica tu cuenta{% endblock %}
+{% block content %}
+<div class="card auth-card">
+  <h1>Verifica tu cuenta</h1>
+  <p style="color:var(--muted); font-size:0.9rem;">
+    Te mandamos un código de 6 dígitos por WhatsApp. Escríbelo aquí para activar tu cuenta.
+  </p>
+  <form method="post">
+    <label>WhatsApp</label>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <span style="padding:9px 10px; border:1px solid var(--border); border-radius:8px; color:var(--muted); background:#f5f5f5;">+52</span>
+      <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="10" pattern="[0-9 ]*" required value="{{ telefono }}" style="flex:1;">
+    </div>
+    <label>Código de verificación</label>
+    <input type="text" name="codigo" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required autofocus>
+    <button type="submit">Verificar cuenta</button>
+  </form>
+</div>
+{% endblock %}
