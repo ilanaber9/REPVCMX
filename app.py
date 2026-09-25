@@ -3563,7 +3563,7 @@ def admin_activar_pendiente_ruta(user, solicitud_id):
         enviar_whatsapp_primer_contacto(
             telefono_whatsapp_e164(telefono),
             "TWILIO_TEMPLATE_ACTIVAR_RUTA_SID",
-            {"1": nombre, "2": zona_texto or "tu zona"},
+            {"1": nombre, "2": zona or "por asignar"},  # la plantilla ya pone los paréntesis: "tu zona ({{2}})"
             f"Hola {nombre},\n\n¡Buenas noticias! Ya tenemos ruta en tu zona{zona_texto} y quedaste integrado.\n"
             "Te avisaremos con la fecha y el horario aproximado en cuanto tu recolección quede programada.",
         )
