@@ -1,16 +1,119 @@
 {% extends "base.html" %}
-{% block title %}Bienvenido{% endblock %}
+{% block title %}RE-PVC — Del cuidado de la gente al cuidado del ambiente{% endblock %}
+{% block head %}
+<style>
+  .inicio-hero {
+    background: linear-gradient(160deg, var(--green) 0%, var(--green-dark) 100%);
+    color: white; border-radius: 14px; padding: 36px 24px; text-align: center; margin-bottom: 20px;
+  }
+  .inicio-hero .lema { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; opacity: 0.85; margin: 0 0 10px; }
+  .inicio-hero h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 12px; }
+  .inicio-hero p { font-size: 1.02rem; line-height: 1.5; margin: 0 auto; max-width: 560px; opacity: 0.95; }
+  .inicio-hero .btn-participar {
+    background: white; color: var(--green-dark); font-weight: 700; font-size: 1.05rem;
+    padding: 14px 28px; border-radius: 999px; margin-top: 22px;
+  }
+  .inicio-hero .btn-participar:hover { background: #eef6f1; }
+  .inicio-hero .ya-soy { display: block; margin-top: 14px; font-size: 0.9rem; color: white; opacity: 0.9; }
+
+  .inicio-seccion h2 { font-size: 1.25rem; margin-bottom: 6px; }
+  .inicio-seccion > p { color: var(--muted); line-height: 1.55; margin-top: 0; }
+
+  .inicio-pasos { list-style: none; padding: 0; margin: 14px 0 0; counter-reset: paso; }
+  .inicio-pasos li {
+    counter-increment: paso; position: relative; padding: 4px 0 16px 48px; line-height: 1.5;
+  }
+  .inicio-pasos li::before {
+    content: counter(paso); position: absolute; left: 0; top: 0; width: 34px; height: 34px;
+    border-radius: 50%; background: #e3f4e9; color: var(--green-dark); font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .inicio-pasos strong { display: block; }
+  .inicio-pasos span { color: var(--muted); font-size: 0.92rem; }
+
+  .inicio-beneficios { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 14px; }
+  .inicio-beneficio { background: var(--bg); border-radius: 10px; padding: 16px; }
+  .inicio-beneficio .icono { font-size: 1.6rem; }
+  .inicio-beneficio strong { display: block; margin: 6px 0 4px; }
+  .inicio-beneficio span { color: var(--muted); font-size: 0.9rem; line-height: 1.45; }
+
+  .inicio-cierre { text-align: center; }
+  .inicio-cierre .btn { font-size: 1.05rem; padding: 14px 28px; border-radius: 999px; }
+
+  .inicio-acceso { text-align: center; color: var(--muted); font-size: 0.88rem; margin: 10px 0 30px; }
+  .inicio-acceso button { background: none; color: var(--muted); text-decoration: underline; padding: 4px; margin: 0; min-height: 0; font-size: 0.88rem; }
+  .inicio-acceso button:hover { background: none; color: var(--text); }
+
+  @media (max-width: 640px) {
+    .inicio-hero { padding: 28px 18px; }
+    .inicio-hero h1 { font-size: 1.55rem; }
+    .inicio-hero .btn-participar, .inicio-cierre .btn { display: block; width: 100%; }
+  }
+</style>
+{% endblock %}
 {% block content %}
-<div class="card auth-card" id="paso-inicial">
-  <h1 style="text-align:center;">Bienvenido a RE-PVC</h1>
-  <p style="color:var(--muted); text-align:center; margin-top:-6px;">¿Quién eres?</p>
-  <div style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
-    <button type="button" id="btn-repvc">Soy de RE-PVC</button>
-    <button type="button" class="secondary" id="btn-paciente">Soy paciente</button>
+<section class="inicio-hero">
+  <p class="lema">Del cuidado de la gente al cuidado del ambiente</p>
+  <h1>Recolectamos en tu casa el material de PVC de tus tratamientos</h1>
+  <p>
+    En RE-PVC pasamos por tu domicilio a recoger el material de PVC que ya usaste, para que no
+    termine en la basura y pueda reciclarse. El servicio es gratuito y además te pagamos por él.
+  </p>
+  <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
+  <a class="ya-soy" href="{{ url_for('login', tipo='cliente') }}">Ya soy parte del programa — iniciar sesión</a>
+</section>
+
+<section class="card inicio-seccion">
+  <h2>¿Qué hacemos?</h2>
+  <p>
+    RE-PVC es un programa de recolección a domicilio para pacientes. Organizamos rutas por zonas,
+    pasamos por el material que juntas en casa y lo llevamos a reciclar. Así el material
+    deja de ocupar espacio en tu casa y se aprovecha en vez de contaminar.
+  </p>
+</section>
+
+<section class="card inicio-seccion">
+  <h2>¿Cómo funciona?</h2>
+  <ol class="inicio-pasos">
+    <li><strong>Te inscribes</strong><span>Revisas si ya tenemos ruta en tu zona y creas tu cuenta con tu número de WhatsApp.</span></li>
+    <li><strong>Te prestamos un bote</strong><span>Ahí vas juntando tu material, separado y seco, como te explicamos en un video corto.</span></li>
+    <li><strong>Te avisamos por WhatsApp</strong><span>Cuando tu recolección queda programada te mandamos el día y el horario aproximado.</span></li>
+    <li><strong>Pasamos por él</strong><span>Nuestro recolector llega a tu domicilio el día de tu ruta.</span></li>
+  </ol>
+</section>
+
+<section class="card inicio-seccion">
+  <h2>¿Por qué participar?</h2>
+  <div class="inicio-beneficios">
+    <div class="inicio-beneficio">
+      <div class="icono">🤝</div>
+      <strong>Es gratuito</strong>
+      <span>La recolección no tiene ningún costo, ni ahora ni nunca.</span>
+    </div>
+    <div class="inicio-beneficio">
+      <div class="icono">💵</div>
+      <strong>Te pagamos $5 por kg</strong>
+      <span>Por el material que nos entregues separado y seco.</span>
+    </div>
+    <div class="inicio-beneficio">
+      <div class="icono">📦</div>
+      <strong>Redistribución de cajas</strong>
+      <span>Si te sobran cajas de material puedes donarlas; si te faltan, puedes solicitarlas.</span>
+    </div>
   </div>
+</section>
+
+<section class="card inicio-cierre">
+  <h2 style="margin-bottom:6px;">¿Te gustaría formar parte?</h2>
+  <p style="color:var(--muted); margin-top:0;">Inscribirte toma unos minutos desde tu celular.</p>
+  <a class="btn" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
+</section>
+
+<div class="inicio-acceso">
+  <button type="button" id="btn-repvc">Acceso para personal de RE-PVC</button>
 </div>
 
-<div class="card auth-card" id="paso-repvc" style="display:none;">
+<div class="card auth-card" id="paso-repvc" style="display:none; margin-top:0;">
   <h1 style="text-align:center;">Soy de RE-PVC</h1>
   <p style="color:var(--muted); text-align:center; margin-top:-6px;">¿Cuál es tu rol?</p>
   <div style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
@@ -20,34 +123,13 @@
     <a class="btn" href="{{ url_for('login', tipo='nef') }}" style="text-align:center;">NEF</a>
     {% endif %}
   </div>
-  <button type="button" class="btn-volver secondary small" style="margin-top:14px;">&larr; Volver</button>
-</div>
-
-<div class="card auth-card" id="paso-paciente" style="display:none;">
-  <h1 style="text-align:center;">Soy paciente</h1>
-  <p style="color:var(--muted); text-align:center; margin-top:-6px;">¿Ya formas parte del programa?</p>
-  <div style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
-    <a class="btn secondary" href="{{ url_for('paciente_intro') }}" style="text-align:center;">Paciente nuevo</a>
-    <a class="btn" href="{{ url_for('login', tipo='cliente') }}" style="text-align:center;">Ya soy parte del programa</a>
-  </div>
-  <button type="button" class="btn-volver secondary small" style="margin-top:14px;">&larr; Volver</button>
 </div>
 
 <script>
 document.getElementById('btn-repvc').addEventListener('click', () => {
-  document.getElementById('paso-inicial').style.display = 'none';
-  document.getElementById('paso-repvc').style.display = 'block';
-});
-document.getElementById('btn-paciente').addEventListener('click', () => {
-  document.getElementById('paso-inicial').style.display = 'none';
-  document.getElementById('paso-paciente').style.display = 'block';
-});
-document.querySelectorAll('.btn-volver').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    document.getElementById('paso-repvc').style.display = 'none';
-    document.getElementById('paso-paciente').style.display = 'none';
-    document.getElementById('paso-inicial').style.display = 'block';
-  });
+  const paso = document.getElementById('paso-repvc');
+  paso.style.display = paso.style.display === 'none' ? 'block' : 'none';
+  if (paso.style.display === 'block') paso.scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 </script>
 {% endblock %}

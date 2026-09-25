@@ -27,7 +27,7 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
-  {% set mostrar_whatsapp = request.path.startswith('/paciente') or request.path.startswith('/registro')
+  {% set mostrar_whatsapp = request.path == '/' or request.path.startswith('/paciente') or request.path.startswith('/registro')
      or request.path.startswith('/cliente') or (request.path == '/login' and request.args.get('tipo') == 'cliente') %}
   {% if mostrar_whatsapp %}
   <a class="whatsapp-float" href="https://wa.me/525521280814" target="_blank" rel="noopener">
