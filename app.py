@@ -346,6 +346,7 @@ def dividir_puntos_por_duracion(
     minutos_max=DURACION_MAXIMA_RUTA_MIN,
     min_paradas=MIN_PARADAS_POR_RUTA,
     minutos_max_lejano=DURACION_MAXIMA_RUTA_LEJANA_MIN,
+    min_despacho=None,
 ):
     """Agrupa puntos (en el orden dado, p. ej. por cercanía) en tandas que quepan en minutos_max
     de manejo ida y vuelta al depósito, llenando cada tanda lo más posible antes de abrir la
@@ -359,7 +360,9 @@ def dividir_puntos_por_duracion(
     veces a medio llenar.
 
     Al final, si la última tanda quedó con menos de min_paradas, la funde con la anterior (o
-    reparte parejo entre ambas) para acercarlas al mínimo de pacientes por ruta que buscamos."""
+    reparte parejo entre ambas) para acercarlas al mínimo de pacientes por ruta que buscamos.
+    Con min_despacho (al crear rutas nuevas), ese reparto parejo no se hace si deja a más
+    pacientes en tandas por debajo de ese mínimo, porque esas tandas no llegarían a salir."""
     if not puntos:
         return []
 
@@ -410,7 +413,13 @@ def dividir_puntos_por_duracion(
             mitad = len(combinado) // 2
             nuevo_par = [combinado[:mitad], combinado[mitad:]]
             topes_par = [_tope_efectivo_grupo(g, minutos_max, minutos_max_lejano) for g in nuevo_par]
-            if all(
+            # Con min_despacho, solo se reparte parejo si eso no deja a más pacientes en tandas
+            # que no alcanzan el mínimo: con 14 puntos que apenas no caben en una ruta, pasar de
+            # 13+1 a 7+7 dejaba las dos tandas bajo el mínimo y no salía ninguna ruta.
+            def pacientes_despachables(tandas):
+                return sum(len(g) for g in tandas if len(g) >= (min_despacho or 0))
+
+            if pacientes_despachables(nuevo_par) >= pacientes_despachables(grupos[-2:]) and all(
                 (estimar_ruta(g) or {"minutos": 0})["minutos"] <= t
                 for g, t in zip(nuevo_par, topes_par)
             ):
@@ -4134,7 +4143,7 @@ def admin_rutas_masivas(user):
             # prioridad ahora es por cercanía dentro de la tanda en vez de por tiempo de espera.
             puntos = fusionar_puntos_mismo_cliente(puntos_raw)
             puntos = ordenar_por_cercania(puntos)
-            grupos_sin_filtrar = dividir_puntos_por_duracion(puntos)
+            grupos_sin_filtrar = dividir_puntos_por_duracion(puntos, min_despacho=MIN_PARADAS_DESPACHO)
             grupos = []
             for grupo_crudo in grupos_sin_filtrar:
                 grupo_filtrado, sobrantes = limitar_cajas_grupo(db, grupo_crudo)
