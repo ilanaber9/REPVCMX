@@ -1,51 +1,180 @@
 {% extends "base.html" %}
-{% block title %}Crear rutas por zona{% endblock %}
+{% block title %}Programar ruta{% endblock %}
+{% block head %}
+<style>
+  .campo-faltante { border-color: var(--danger) !important; background: #fff6f5 !important; }
+  .aviso-faltante { color: var(--danger); font-size: 0.85rem; margin-top: 4px; display: none; }
+  .campo-faltante + .aviso-faltante, .aviso-faltante.visible { display: block; }
+  .ruta-elegida {
+    border: 1px dashed var(--border); border-radius: 8px; padding: 12px; margin-top: 6px;
+    color: var(--muted); font-size: 0.95rem;
+  }
+  .ruta-elegida.lista { border: 2px solid var(--green); color: var(--text); background: #f1f8f4; font-weight: 600; }
+  .ruta-elegida.campo-faltante { border: 2px solid var(--danger); }
+  .lista-rutas { list-style: none; padding: 0; margin: 12px 0 0; }
+  .lista-rutas li {
+    border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .lista-rutas li.seleccionada { border: 2px solid var(--green); background: #f1f8f4; }
+  .lista-rutas .ruta-info { flex: 1; min-width: 180px; }
+  .lista-rutas .ruta-info strong { display: block; }
+  .lista-rutas .ruta-datos { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+  .lista-rutas .acciones { display: flex; gap: 6px; }
+  .lista-rutas .acciones .btn, .lista-rutas .acciones button { margin-top: 0; }
+  .badge.sugerida { background: #e3f4e9; color: var(--green-dark); margin-left: 6px; }
+</style>
+{% endblock %}
 {% block content %}
 <div class="card">
-  <a href="{{ url_for('admin_dashboard') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
-  <h1>Crear rutas por zona (masivo)</h1>
-  <p style="color:var(--muted); font-size:0.9rem;">
-    Marca las zonas que quieres convertir en ruta hoy. Cada zona se convierte en una o varias rutas
-    (según quepan en 7:30 hrs) con sus puntos pendientes, priorizando a quien lleva más tiempo
-    esperando su recolección y ordenados por cercanía real entre paradas.
-  </p>
+  <a href="{{ url_for('admin_dashboard', tab='rutas') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
+  <h1>Programar ruta</h1>
 
   {% if zonas %}
-  <form method="post" onsubmit="if(this.dataset.enviado){return false;} this.dataset.enviado='1'; this.querySelector('button[type=submit]').disabled=true;">
-    <label>Fecha para todas las rutas seleccionadas</label>
-    <input type="date" name="fecha" required style="max-width:220px;">
-    <label>Hora de salida (para avisarle a los pacientes)</label>
-    <input type="time" name="hora_salida" value="08:00" required style="max-width:150px;">
+  <form id="form-programar" method="post" novalidate>
+    <label>Ruta</label>
+    <input type="hidden" name="zona" id="campo-zona" value="">
+    <div class="ruta-elegida" id="ruta-elegida">Elige una ruta de la lista de abajo o búscala por número.</div>
+    <div class="aviso-faltante" id="aviso-zona">Elige la ruta que vas a programar.</div>
 
-    <table style="margin-top:14px;">
-      <tr><th></th><th>Zona</th><th>Puntos pendientes</th><th>Recolector</th><th></th></tr>
-      {% for z in zonas %}
-      <tr>
-        <td><input type="checkbox" name="zonas" value="{{ z['zona'] }}"></td>
-        <td>{{ z['zona'] }}</td>
-        <td>{{ z['n'] }}</td>
-        <td>
-          <select name="recolector_id__{{ z['zona'] }}" style="min-width:170px;">
-            <option value="">Sin recolector (no se creará la ruta)</option>
-            {% for r in recolectores %}
-            <option value="{{ r['id'] }}">{{ r['name'] }}</option>
-            {% endfor %}
-          </select>
-        </td>
-        <td>
-          <a class="btn secondary small" target="_blank" href="{{ url_for('admin_zona_mapa', zona=z['zona']) }}">Ver detalle</a>
-        </td>
-      </tr>
+    <label for="campo-fecha">Día</label>
+    <input type="date" name="fecha" id="campo-fecha" min="{{ hoy }}" style="max-width:220px;">
+    <div class="aviso-faltante">Elige el día de la ruta.</div>
+
+    <label for="campo-hora">Hora de salida</label>
+    <input type="time" name="hora_salida" id="campo-hora" value="08:00" style="max-width:150px;">
+    <div class="aviso-faltante">Pon la hora de salida.</div>
+
+    <label for="campo-recolector">Recolector asignado</label>
+    <select name="recolector_id" id="campo-recolector" style="max-width:320px;">
+      <option value="">Elige un recolector…</option>
+      {% for r in recolectores %}
+      <option value="{{ r['id'] }}">{{ r['name'] }}</option>
       {% endfor %}
-    </table>
+    </select>
+    <div class="aviso-faltante">Elige qué recolector hará la ruta.</div>
+    {% if not recolectores %}
+    <p class="empty">No hay recolectores todavía — créalos en "Alta y baja de cuentas".</p>
+    {% endif %}
 
-    <button type="submit" style="margin-top:16px;">Crear rutas seleccionadas</button>
+    <div>
+      <button type="submit" id="btn-programar">Programar ruta</button>
+    </div>
+    <p style="color:var(--muted); font-size:0.82rem; margin-top:8px;">
+      Al programarla, a cada paciente de la ruta le llega un WhatsApp con el día y el horario aproximado.
+    </p>
   </form>
-  {% if not recolectores %}
-  <p class="empty">No hay recolectores todavía; puedes crear las rutas sin asignar y asignarlas luego.</p>
-  {% endif %}
-  {% else %}
-  <p class="empty">No hay zonas con puntos pendientes.</p>
   {% endif %}
 </div>
+
+<div class="card">
+  <h2>Le tocan por programa</h2>
+  {% if zonas %}
+  <p style="color:var(--muted); font-size:0.88rem; margin-top:0;">
+    Primero las rutas cuyos pacientes llevan más tiempo esperando su recolección. Si no hay una
+    situación especial, programa la primera de la lista.
+  </p>
+  <label for="buscar-ruta">Buscar ruta por número</label>
+  <input type="search" id="buscar-ruta" inputmode="numeric" placeholder="Ej. 33" autocomplete="off" style="max-width:220px;">
+  <p id="sin-resultados" class="empty" style="display:none;">Ninguna ruta con pacientes pendientes coincide con ese número.</p>
+
+  <ul class="lista-rutas" id="lista-rutas">
+    {% for z in zonas %}
+    <li data-zona="{{ z['zona'] }}">
+      <div class="ruta-info">
+        <strong>{{ z['zona'] }}{% if loop.index <= 3 %}<span class="badge sugerida">{{ 'Le toca' if loop.first else 'Siguiente' }}</span>{% endif %}</strong>
+        <div class="ruta-datos">
+          {{ z['n'] }} punto{{ '' if z['n'] == 1 else 's' }} pendiente{{ '' if z['n'] == 1 else 's' }}
+          · {% if z['dias_espera'] is not none and z['dias_espera'] > 0 %}esperando desde hace {{ z['dias_espera'] }} día{{ '' if z['dias_espera'] == 1 else 's' }}{% else %}listos desde hoy{% endif %}
+        </div>
+      </div>
+      <div class="acciones">
+        <a class="btn secondary small" target="_blank" href="{{ url_for('admin_zona_mapa', zona=z['zona']) }}">Ver mapa</a>
+        <button type="button" class="small btn-elegir">Programar</button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No hay rutas con pacientes pendientes por ahora.</p>
+  {% endif %}
+</div>
+
+{% if zonas %}
+<script>
+(function () {
+  var form = document.getElementById('form-programar');
+  var campoZona = document.getElementById('campo-zona');
+  var rutaElegida = document.getElementById('ruta-elegida');
+  var avisoZona = document.getElementById('aviso-zona');
+  var items = Array.prototype.slice.call(document.querySelectorAll('#lista-rutas li'));
+  var obligatorios = ['campo-fecha', 'campo-hora', 'campo-recolector'].map(function (id) { return document.getElementById(id); });
+
+  function elegir(li) {
+    items.forEach(function (x) { x.classList.remove('seleccionada'); });
+    li.classList.add('seleccionada');
+    campoZona.value = li.dataset.zona;
+    rutaElegida.textContent = li.dataset.zona + ' — ' + li.querySelector('.ruta-datos').textContent.trim().replace(/\s+/g, ' ');
+    rutaElegida.classList.add('lista');
+    rutaElegida.classList.remove('campo-faltante');
+    avisoZona.classList.remove('visible');
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  items.forEach(function (li) {
+    li.querySelector('.btn-elegir').addEventListener('click', function () { elegir(li); });
+  });
+
+  // Buscador: con puros dígitos compara contra el número de la ruta ("3" encuentra la 03, 30, 33…);
+  // con texto, busca en el nombre completo.
+  var buscador = document.getElementById('buscar-ruta');
+  var sinResultados = document.getElementById('sin-resultados');
+  buscador.addEventListener('input', function () {
+    var q = buscador.value.trim().toLowerCase();
+    var soloDigitos = /^\d+$/.test(q);
+    var visibles = 0;
+    items.forEach(function (li) {
+      var nombre = li.dataset.zona.toLowerCase();
+      var m = nombre.match(/ruta\s*0*(\d+)/);
+      var coincide = !q || (soloDigitos ? (m && m[1].indexOf(q.replace(/^0+(?=\d)/, '')) === 0) : nombre.indexOf(q) !== -1);
+      li.style.display = coincide ? '' : 'none';
+      if (coincide) visibles++;
+    });
+    sinResultados.style.display = visibles ? 'none' : 'block';
+  });
+  // Si el navegador restauró lo escrito al regresar a la página, vuelve a aplicar el filtro.
+  if (buscador.value) buscador.dispatchEvent(new Event('input'));
+
+  // Todo es obligatorio: lo que falte se marca en rojo y no se envía.
+  obligatorios.forEach(function (c) {
+    c.addEventListener('input', function () { if (c.value) c.classList.remove('campo-faltante'); });
+    c.addEventListener('change', function () { if (c.value) c.classList.remove('campo-faltante'); });
+  });
+  form.addEventListener('submit', function (e) {
+    if (form.dataset.enviado) { e.preventDefault(); return; }
+    var primero = null;
+    if (!campoZona.value) {
+      rutaElegida.classList.add('campo-faltante');
+      avisoZona.classList.add('visible');
+      primero = rutaElegida;
+    }
+    obligatorios.forEach(function (c) {
+      if (!c.value) { c.classList.add('campo-faltante'); primero = primero || c; }
+    });
+    if (primero) {
+      e.preventDefault();
+      primero.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    form.dataset.enviado = '1';
+    document.getElementById('btn-programar').disabled = true;
+  });
+
+  var pre = {{ zona_preseleccionada | tojson }};
+  if (pre) {
+    var li = items.find(function (x) { return x.dataset.zona === pre; });
+    if (li) elegir(li);
+  }
+})();
+</script>
+{% endif %}
 {% endblock %}

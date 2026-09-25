@@ -4092,6 +4092,21 @@ def admin_rutas_masivas(user):
     recolectores = db.execute("SELECT * FROM users WHERE role = 'recolector' ORDER BY name").fetchall()
 
     if request.method == "POST":
+        # Se programa una ruta a la vez: la programadora la elige de la lista "Le tocan por
+        # programa" o la busca por número, y los cuatro datos son obligatorios (el formulario ya
+        # los marca en rojo; esto es el respaldo del lado del servidor).
+        zona_elegida = request.form.get("zona", "").strip()
+        faltan = [
+            nombre for nombre, valor in (
+                ("ruta", zona_elegida),
+                ("día", request.form.get("fecha", "").strip()),
+                ("hora de salida", request.form.get("hora_salida", "").strip()),
+                ("recolector", request.form.get("recolector_id", "").strip()),
+            ) if not valor
+        ]
+        if faltan:
+            flash("Falta elegir: " + ", ".join(faltan) + ". No se creó la ruta.", "error")
+            return redirect(url_for("admin_rutas_masivas", zona=zona_elegida or None))
         # Toma el lock de escritura desde el inicio (antes de leer qué solicitudes están
         # pendientes) para que, si el formulario se envía dos veces casi al mismo tiempo, la
         # segunda petición espere a que la primera termine y confirme sus cambios, y así vea las
@@ -4106,9 +4121,9 @@ def admin_rutas_masivas(user):
                 "error",
             )
             return redirect(url_for("admin_dashboard"))
-        zonas_seleccionadas = request.form.getlist("zonas")
-        fecha = request.form.get("fecha") or date.today().isoformat()
-        hora_salida = request.form.get("hora_salida") or "08:00"
+        zonas_seleccionadas = [zona_elegida]
+        fecha = request.form["fecha"].strip()
+        hora_salida = request.form["hora_salida"].strip()
         rutas_creadas = 0
         paradas_creadas = 0
         zonas_omitidas = []
@@ -4119,7 +4134,7 @@ def admin_rutas_masivas(user):
         proximo_numero_ruta = siguiente_numero_ruta(db)
         parada_ids_nuevas = []
         for zona in zonas_seleccionadas:
-            recolector_id = request.form.get(f"recolector_id__{zona}") or None
+            recolector_id = request.form.get("recolector_id") or None
             if not recolector_id:
                 zonas_omitidas.append(zona)
                 continue
@@ -4231,11 +4246,24 @@ def admin_rutas_masivas(user):
         )
         return redirect(url_for("admin_dashboard", tab="rutas"))
 
+    # Orden "por programa": primero la ruta cuyo paciente lleva más tiempo listo para recolectar
+    # (desde su alta si nunca se le ha recolectado, o desde que se cumplieron sus 30/60 días).
+    dias_caso = f"CASE WHEN modalidad = 'compra' THEN {DIAS_ESPERA_COMPRA} ELSE {DIAS_ESPERA_DONACION} END"
+    listo_desde = (
+        "CASE WHEN fecha_reinicio_espera IS NULL THEN created_at "
+        f"ELSE datetime(fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') END"
+    )
     zonas = db.execute(
-        "SELECT zona, COUNT(*) AS n FROM solicitudes WHERE estado IN ('pendiente', 'pendiente_entrega') "
-        f"AND zona IS NOT NULL AND {condicion_lista_para_recoleccion()} GROUP BY zona ORDER BY zona"
+        f"SELECT zona, COUNT(*) AS n, MIN({listo_desde}) AS listo_desde, "
+        f"CAST(julianday('now', 'localtime') - julianday(MIN({listo_desde})) AS INTEGER) AS dias_espera "
+        "FROM solicitudes WHERE estado IN ('pendiente', 'pendiente_entrega') "
+        f"AND zona IS NOT NULL AND {condicion_lista_para_recoleccion()} "
+        "GROUP BY zona ORDER BY MIN(" + listo_desde + "), zona"
     ).fetchall()
-    return render_template("admin_rutas_masivas.html", zonas=zonas, recolectores=recolectores)
+    return render_template(
+        "admin_rutas_masivas.html", zonas=zonas, recolectores=recolectores,
+        zona_preseleccionada=request.args.get("zona", ""), hoy=date.today().isoformat(),
+    )
 
 
 @app.route("/admin/rutas/<int:ruta_id>")

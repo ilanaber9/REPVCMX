@@ -113,7 +113,7 @@
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <h1 style="margin:0;">Rutas pendientes</h1>
       <div style="display:flex; gap:8px;">
-        <a class="btn secondary small" href="{{ url_for('admin_rutas_masivas') }}">Crear rutas por zona</a>
+        <a class="btn secondary small" href="{{ url_for('admin_rutas_masivas') }}">Programar ruta</a>
         <a class="btn secondary small" href="{{ url_for('admin_mapa') }}">Ver mapa completo</a>
       </div>
     </div>
@@ -126,7 +126,7 @@
     {{ ruta_card(r) }}
     {% endfor %}
     {% else %}
-    <p class="empty">No hay rutas pendientes — créalas desde "Crear rutas por zona".</p>
+    <p class="empty">No hay rutas pendientes — créalas desde "Programar ruta".</p>
     {% endif %}
   </div>
 
@@ -147,7 +147,7 @@
   <div class="card">
     <h1 style="margin:0;">Solicitudes pendientes</h1>
     <p style="color:var(--muted); font-size:0.85rem;">
-      Para programarlas en una ruta, ve a "Programación de ruta" → "Crear rutas por zona".
+      Para programarlas en una ruta, ve a "Programación de ruta" → "Programar ruta".
     </p>
 
     <h2 style="margin-top:20px;">Solicitudes de clientes</h2>
@@ -228,7 +228,7 @@
     <p style="color:var(--muted); font-size:0.85rem; margin-top:14px;">
       Hay <strong>{{ pacientes_prueba|length }}</strong> paciente(s) de prueba activos ahora mismo. No
       aparecen en "Pacientes" (esa pestaña es solo para cuentas reales) — para usarlos, ve a
-      "Programación de ruta" → "Crear rutas por zona", ahí sí aparecen agrupados por zona listos para
+      "Programación de ruta" → "Programar ruta", ahí sí aparecen agrupados por zona listos para
       programar una ruta con ellos, igual que con pacientes reales.
     </p>
     <div class="table-scroll" style="margin-top:10px; max-height:320px; overflow-y:auto;">

@@ -83,7 +83,8 @@ button.warn { background: var(--warn); }
 form.inline { display: inline; }
 
 label { display: block; font-size: 0.85rem; color: var(--muted); margin-top: 10px; margin-bottom: 4px; }
-input[type=text], input[type=email], input[type=password], input[type=date], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=date], input[type=time],
+input[type=number], input[type=tel], input[type=search], select, textarea {
   width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem;
   font-family: inherit;
 }
