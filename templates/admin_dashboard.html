@@ -428,6 +428,7 @@
     {% endif %}
   </div>
 
+  {% if MOSTRAR_NEF %}
   <div class="card">
     <h1 style="margin:0;">Crear cuenta de NEF</h1>
     <p style="color:var(--muted); font-size:0.85rem;">Con esta cuenta, NEF puede entrar y publicar información, videos y eventos para los pacientes.</p>
@@ -467,12 +468,13 @@
     <p class="empty">Aún no hay cuentas de NEF.</p>
     {% endif %}
   </div>
+  {% endif %}
 
   <div class="card">
     <h1 style="margin:0;">Crear otra cuenta de administrador general</h1>
     <p style="color:var(--muted); font-size:0.85rem;">
       El administrador general es la cuenta maestra: tiene todos los permisos, incluyendo crear y dar de baja
-      cuentas de administrador, recolector y NEF, ver "Horas extra" y editar las vacaciones.
+      cuentas de administrador, recolector{% if MOSTRAR_NEF %} y NEF{% endif %}, ver "Horas extra" y editar las vacaciones.
     </p>
     <form method="post" action="{{ url_for('admin_nuevo_admin_general') }}">
       <label>Nombre</label>
@@ -825,7 +827,7 @@
 <div class="tab-panel" data-tab="videos">
   <div class="card">
     <h1 style="margin:0;">Subir video</h1>
-    <p style="color:var(--muted); font-size:0.9rem;">Estos videos los ven todos los pacientes en su pestaña "Videos" — no se relacionan con el contenido de NEF.</p>
+    <p style="color:var(--muted); font-size:0.9rem;">Estos videos los ven todos los pacientes en su pestaña "Videos"{% if MOSTRAR_NEF %} — no se relacionan con el contenido de NEF{% endif %}.</p>
     <form method="post" action="{{ url_for('admin_nuevo_video') }}" enctype="multipart/form-data">
       <label>Título</label>
       <input type="text" name="titulo" required>

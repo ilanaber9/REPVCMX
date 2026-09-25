@@ -38,6 +38,7 @@
       <option value="desconocida">Desconocida</option>
     </select>
 
+    {% if MOSTRAR_NEF %}
     <div style="background:var(--bg); border-radius:8px; padding:14px; margin-top:20px;">
       <strong>NEF — Educación renal</strong>
       <p style="color:var(--muted); font-size:0.88rem; margin-top:6px;">
@@ -52,6 +53,7 @@
         <label><input type="radio" name="recibir_info_nef" value="0" required> No quiero recibir información</label>
       </div>
     </div>
+    {% endif %}
 
     <button type="submit">Continuar</button>
   </form>

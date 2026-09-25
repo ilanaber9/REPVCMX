@@ -61,6 +61,12 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("DATABASE_PATH"))
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB por archivo subido
 
+# Todo lo de NEF (acceso de NEF, su pestaña para pacientes, la pregunta de si quieren recibir su
+# información y las cuentas de NEF en el admin) sigue en el código pero oculto hasta que haya
+# contenido que mostrar. Para volver a mostrarlo basta con poner MOSTRAR_NEF=1 en las variables
+# de entorno de Render.
+MOSTRAR_NEF = os.environ.get("MOSTRAR_NEF") == "1"
+
 RUTAS_SIN_VALIDACION_ORIGEN = {"webhook_whatsapp"}  # no vienen de un navegador con sesión; el
 # webhook de Twilio ya se valida con su propia firma criptográfica, no con esto.
 
@@ -1822,7 +1828,7 @@ def login_required(*roles):
 
 @app.context_processor
 def inject_user():
-    return {"current_user": current_user(), "ESTADO_LABELS": ESTADO_LABELS}
+    return {"current_user": current_user(), "ESTADO_LABELS": ESTADO_LABELS, "MOSTRAR_NEF": MOSTRAR_NEF}
 
 
 # ---------- General ----------
@@ -2366,7 +2372,8 @@ def cliente_bienvenida(user):
         marca = request.form.get("marca")
         frecuencia_semana = request.form.get("frecuencia_semana", "").strip()
         causa_enfermedad = request.form.get("causa_enfermedad")
-        recibir_info_nef = request.form.get("recibir_info_nef")
+        # Con NEF oculto no se les pregunta; quedan en "no" y se les podrá preguntar cuando se active.
+        recibir_info_nef = request.form.get("recibir_info_nef") if MOSTRAR_NEF else "0"
 
         if tipo_maquina not in ("maquina", "manual") or marca not in ("baxter", "pisa"):
             flash("Selecciona el tipo y la marca.", "error")

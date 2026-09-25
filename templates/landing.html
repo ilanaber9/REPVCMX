@@ -16,7 +16,9 @@
   <div style="display:flex; flex-direction:column; gap:10px; margin-top:16px;">
     <a class="btn" href="{{ url_for('login', tipo='admin') }}" style="text-align:center;">Administrador</a>
     <a class="btn" href="{{ url_for('login', tipo='recolector') }}" style="text-align:center;">Recolector</a>
+    {% if MOSTRAR_NEF %}
     <a class="btn" href="{{ url_for('login', tipo='nef') }}" style="text-align:center;">NEF</a>
+    {% endif %}
   </div>
   <button type="button" class="btn-volver secondary small" style="margin-top:14px;">&larr; Volver</button>
 </div>

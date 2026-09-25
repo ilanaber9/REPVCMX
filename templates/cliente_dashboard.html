@@ -8,7 +8,7 @@
   <button type="button" class="tab-btn" data-tab="cajas">Mis cajas</button>
   <button type="button" class="tab-btn" data-tab="redistribucion">Redistribución de cajas</button>
   <button type="button" class="tab-btn" data-tab="videos">Videos</button>
-  {% if current_user['recibir_info_nef'] %}
+  {% if MOSTRAR_NEF and current_user['recibir_info_nef'] %}
   <button type="button" class="tab-btn" data-tab="nef" id="tab-btn-nef">NEF{% if nef_nuevas %} ({{ nef_nuevas }}){% endif %}</button>
   {% endif %}
 </div>
@@ -242,7 +242,7 @@
   </div>
 </div>
 
-{% if current_user['recibir_info_nef'] %}
+{% if MOSTRAR_NEF and current_user['recibir_info_nef'] %}
 <div class="tab-panel" data-tab="nef">
   {% set nef_videos = nef_publicaciones | selectattr('tipo', 'equalto', 'video') | list %}
   {% if nef_videos %}
