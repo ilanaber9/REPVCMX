@@ -37,5 +37,40 @@
     <span>¿En qué podemos ayudarte?</span>
   </a>
   {% endif %}
+  <script>
+    // Prepara cada tabla para verse como tarjetas en el celular (ver "Celular" en style.css):
+    // a cada celda le pone el nombre de su columna, sacado del renglón de encabezados, y envuelve
+    // su contenido para que quede a la derecha de ese nombre. En pantalla grande no cambia nada.
+    function prepararTablasMovil(raiz) {
+      (raiz || document).querySelectorAll("table:not(.tabla-movil)").forEach(function (tabla) {
+        var filas = Array.prototype.slice.call(tabla.rows);
+        var encabezado = filas.find(function (tr) {
+          return tr.cells.length && Array.prototype.every.call(tr.cells, function (c) { return c.tagName === "TH"; });
+        });
+        if (!encabezado) return;
+        var nombres = [];
+        Array.prototype.forEach.call(encabezado.cells, function (th) {
+          for (var i = 0; i < (th.colSpan || 1); i++) nombres.push(th.textContent.trim());
+        });
+        encabezado.classList.add("tabla-movil-encabezado");
+        filas.forEach(function (tr) {
+          if (tr === encabezado) return;
+          var col = 0;
+          Array.prototype.forEach.call(tr.cells, function (td) {
+            var nombre = (td.colSpan || 1) === 1 ? nombres[col] : "";
+            col += td.colSpan || 1;
+            if (nombre) td.setAttribute("data-label", nombre);
+            if (!td.textContent.trim() && !td.querySelector("input,select,button,a,img,form")) td.classList.add("tabla-movil-vacia");
+            var envoltura = document.createElement("div");
+            envoltura.className = "tabla-movil-valor";
+            while (td.firstChild) envoltura.appendChild(td.firstChild);
+            td.appendChild(envoltura);
+          });
+        });
+        tabla.classList.add("tabla-movil");
+      });
+    }
+    prepararTablasMovil();
+  </script>
 </body>
 </html>

@@ -201,3 +201,68 @@ button.danger { background: var(--danger); }
 }
 .video-dropzone strong { color: var(--text); }
 .video-dropzone .video-dropzone-archivo { margin-top: 8px; font-weight: 600; color: var(--green-dark); }
+
+/* ---------- Celular ----------
+   La mayoría de pacientes, recolectores y admins entran desde el celular. En pantallas angostas:
+   las tablas se vuelven tarjetas (una por renglón, con el nombre de cada columna a la izquierda;
+   las etiquetas las pone el script al final de base.html), las pestañas se acomodan en varios
+   renglones en vez de esconderse a la derecha, los campos usan letra de 16px (con menos, el
+   iPhone hace zoom solo al tocarlos) y los botones tienen tamaño cómodo para el dedo. */
+@media (max-width: 640px) {
+  main { margin: 14px auto; padding: 0 12px 90px; }
+  .card { padding: 16px 14px; }
+  h1 { font-size: 1.3rem; }
+
+  header.topbar {
+    padding: 10px 14px;
+    background: linear-gradient(90deg, #eef6f1 0%, #eef6f1 90px, var(--green) 200px, var(--green) 100%);
+  }
+  header.topbar .brand img { height: 34px; }
+  header.topbar .nav-right span { display: none; }
+  header.topbar .nav-right a {
+    padding: 8px 14px; border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 6px;
+  }
+
+  input[type=text], input[type=email], input[type=password], input[type=date], input[type=time],
+  input[type=number], input[type=tel], input[type=search], select, textarea {
+    font-size: 16px; padding: 10px 12px; max-width: 100% !important;
+  }
+  input[style*="width"], select[style*="width"] { width: 100% !important; min-width: 0 !important; }
+  .checklist .estado-form > input[type=text] { flex: 1 1 100% !important; }
+  .checklist .estado-form > label { flex: 1 1 40%; margin-top: 0; }
+
+  button, .btn { padding: 11px 16px; font-size: 0.95rem; min-height: 44px; }
+  button.small, .btn.small { padding: 8px 12px; font-size: 0.88rem; min-height: 38px; }
+
+  .tabs { flex-wrap: wrap; overflow-x: visible; gap: 6px; border-bottom: none; padding-bottom: 4px; }
+  .tab-btn, .subtab-btn, .subtab2-btn {
+    border: 1px solid var(--border); border-radius: 999px; padding: 8px 12px;
+    background: white; font-size: 0.85rem; min-height: 0; white-space: normal;
+  }
+  .tab-btn.active, .subtab-btn.active, .subtab2-btn.active {
+    background: var(--green); color: white; border-color: var(--green);
+  }
+  .tab-btn:hover, .subtab-btn:hover, .subtab2-btn:hover { background: white; }
+  .tab-btn.active:hover, .subtab-btn.active:hover, .subtab2-btn.active:hover { background: var(--green); }
+
+  table.tabla-movil, table.tabla-movil tbody, table.tabla-movil tr, table.tabla-movil td {
+    display: block; width: 100%;
+  }
+  .table-scroll table.tabla-movil { min-width: 0; }
+  table.tabla-movil tr.tabla-movil-encabezado { display: none; }
+  table.tabla-movil tr {
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; background: white;
+  }
+  table.tabla-movil td {
+    border-bottom: 1px solid #eef1ef; padding: 7px 0; white-space: normal !important;
+    display: flex; gap: 10px; align-items: flex-start;
+  }
+  table.tabla-movil td:last-child { border-bottom: none; }
+  table.tabla-movil td[data-label]::before {
+    content: attr(data-label); flex: 0 0 38%; color: var(--muted); font-size: 0.8rem; font-weight: 600;
+  }
+  table.tabla-movil .tabla-movil-valor { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  table.tabla-movil td:empty, table.tabla-movil td.tabla-movil-vacia { display: none; }
+  .table-scroll { overflow-x: visible; }
+  .solo-escritorio { display: none !important; }
+}
