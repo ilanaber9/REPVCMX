@@ -3487,14 +3487,6 @@ def _revertir_efectos_parada(db, p):
             "WHERE id = ? AND estado = 'pendiente'",
             (p["solicitud_id"],),
         )
-    elif p["estado"] == "completada":
-        # Una recolección completada dejó al paciente esperando 30/60 días para la siguiente;
-        # al deshacerla vuelve a quedar listo para programarse.
-        db.execute(
-            "UPDATE solicitudes SET fecha_reinicio_espera = NULL "
-            "WHERE id = ? AND estado = 'pendiente' AND tipo_redistribucion IS NULL",
-            (p["solicitud_id"],),
-        )
     if p["solicitud_extra_id"] and p["estado_extra"] == "completada" and p["tipo_extra"] == "entrega":
         db.execute(
             "UPDATE solicitudes SET estado = 'pendiente_entrega', fecha_reinicio_espera = NULL "
