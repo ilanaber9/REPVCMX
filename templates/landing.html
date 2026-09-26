@@ -44,6 +44,21 @@
   .cuadro-redistribucion { border: 2px solid var(--green); background: #f8fcf9; display: grid; grid-template-columns: minmax(0, 42%) 1fr; gap: 22px; align-items: center; }
   .cuadro-redistribucion .foto-cajas { width: 100%; height: auto; display: block; filter: drop-shadow(0 6px 8px rgba(0,0,0,0.22)); }
   .cuadro-redistribucion .texto-cajas h2 { margin-top: 0; font-size: 1.5rem; }
+  .inicio-hero .oferta { font-size: 1.05rem; margin: 12px auto 0; max-width: 520px; }
+  .problema h2 { text-align: center; }
+  .problemas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+  .problemas > div { background: #f6f8f7; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 4px; line-height: 1.4; }
+  .problemas .icono { font-size: 1.6rem; }
+  .problemas span:not(.icono) { color: var(--muted); font-size: 0.92rem; }
+  .empatia { font-size: 1.05rem; }
+  .promesas { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .promesas span { background: #e3f4e9; color: var(--green-dark); border-radius: 999px; padding: 6px 12px; font-size: 0.85rem; font-weight: 600; }
+  .sincon { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .sincon > div { border-radius: 10px; padding: 14px 16px; }
+  .sincon h3 { margin: 0 0 6px; font-size: 1.05rem; }
+  .sincon ul { margin: 0; padding-left: 18px; line-height: 1.6; }
+  .sincon .sin { background: #fbeceb; } .sincon .sin h3 { color: var(--danger); }
+  .sincon .con { background: #e8f5ec; } .sincon .con h3 { color: var(--green-dark); }
   .inicio-seccion h2 { font-size: 1.25rem; margin-bottom: 6px; }
   .inicio-seccion > p { color: var(--muted); line-height: 1.55; margin-top: 0; }
 
@@ -87,6 +102,7 @@
     .inicio-hero h1 { font-size: 1.55rem; }
     .inicio-hero h1.pregunta { font-size: 1.85rem; }
     .cuadro-redistribucion { grid-template-columns: 1fr; gap: 14px; }
+    .problemas, .sincon { grid-template-columns: 1fr; }
     .inicio-impacto { grid-template-columns: 1fr; }
     .inicio-impacto > div { display: grid; grid-template-columns: 44px 1fr; text-align: left; align-items: center; column-gap: 10px; }
     .inicio-impacto .icono { grid-row: span 4; text-align: center; }
@@ -100,13 +116,24 @@
   <p class="lema">Del cuidado de la gente al cuidado del ambiente</p>
   <h1 class="pregunta">¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden reciclar?</h1>
   <p class="dato">Un paciente puede producir hasta <strong>100 kg</strong> de este material al año.</p>
+  <p class="oferta">Nosotros pasamos a tu casa a recogerlas, <strong>sin costo para ti</strong>, y las convertimos en nuevos productos.</p>
   <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
-  <a class="ya-soy" href="#tutorial" style="margin-top:10px;">▶ Ver cómo funciona (video de 2 minutos)</a>
+  <a class="ya-soy" href="#tutorial" style="margin-top:10px;">▶ Ver cómo funciona (video de 3 minutos)</a>
   <a class="ya-soy" href="{{ url_for('login', tipo='cliente') }}">Ya soy parte del programa — iniciar sesión</a>
+</section>
+
+<section class="card inicio-seccion problema">
+  <h2>Cuidar tu salud no debería llenar tu casa de plástico</h2>
+  <div class="problemas">
+    <div><span class="icono">📦</span><strong>Las bolsas se acumulan</strong><span>Un paciente puede generar hasta 100 kg de PVC al año, y todo eso ocupa espacio en casa.</span></div>
+    <div><span class="icono">🗑️</span><strong>No hay a dónde llevarlas</strong><span>Si nadie pasa por ellas, terminan en la basura, aunque este material se puede reciclar.</span></div>
+    <div><span class="icono">🌎</span><strong>Tu tratamiento es indispensable</strong><span>Pero cuidar tu salud no tendría que costarle al ambiente. Hay una mejor forma de hacerlo.</span></div>
+  </div>
 </section>
 
 <section class="card inicio-seccion">
   <h2>¿Qué hacemos?</h2>
+  <p class="empatia">Sabemos lo mucho que te exige tu tratamiento. Por eso <strong>nos encargamos nosotros</strong>: tú solo juntas tus bolsas y nosotros pasamos por ellas.</p>
   <p>
     RE-PVC es un programa de recolección a domicilio de residuos derivados de la diálisis
     peritoneal. Recuperamos y procesamos el PVC de las bolsas para reincorporarlo a la fabricación
@@ -141,6 +168,37 @@
   <p class="kg-cifra"><span id="kg-valor">{{ "{:,.1f}".format(kg_reciclados) }}</span> <small>kg</small></p>
 </section>
 
+<section class="card inicio-seccion plan">
+  <h2>Empezar es muy sencillo: 3 pasos</h2>
+  <ol class="inicio-pasos">
+    <li>
+      <strong>Revisa si tenemos ruta en tu zona</strong>
+      <span>Escribe tu código postal:</span>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <input type="text" id="cp-verificar" placeholder="Código postal" maxlength="5" pattern="[0-9]*" inputmode="numeric" style="flex:1; min-width:140px; max-width:160px;">
+        <button type="button" id="btn-verificar-cp" class="small" style="margin-top:0;">Verificar</button>
+      </div>
+      <p id="resultado-cp" style="font-size:0.88rem; margin:8px 0 0;"></p>
+      <div id="opciones-cp" style="margin-top:6px;"></div>
+    </li>
+    <li><strong>Regístrate con tu número de WhatsApp y llena el formulario</strong><span>Ahí recibirás toda la información necesaria.</span></li>
+    <li><strong>Te dejamos un bote y pasamos por tu material</strong><span>Programamos la entrega de un bote en tu domicilio para que juntes tu material. Cuando le toque a tu zona, te avisamos por WhatsApp el día y el horario aproximado en que pasamos.</span></li>
+  </ol>
+  <div class="promesas">
+    <span>✔ Servicio gratuito</span><span>✔ Recolección en tu domicilio</span><span>✔ Te avisamos por WhatsApp</span>
+  </div>
+  <a class="btn" href="{{ url_for('paciente_intro') }}" style="display:block; text-align:center; margin-top:14px;">Quiero participar</a>
+</section>
+
+<section class="card inicio-seccion" id="tutorial" style="text-align:center;">
+  <h2>Así funciona: video tutorial</h2>
+  <p>Mira, paso a paso, cómo inscribirte, cómo saber si estás programado y cómo donar o recibir cajas.</p>
+  <video controls preload="metadata" playsinline poster="{{ url_for('static', filename='videos/tutorial-repvc.jpg') }}"
+         style="width:100%; max-width:340px; border-radius:12px; background:#000; margin:6px auto 0; display:block;">
+    <source src="{{ url_for('static', filename='videos/tutorial-repvc.mp4') }}" type="video/mp4">
+  </video>
+</section>
+
 <section class="card inicio-seccion cuadro-redistribucion">
   <img class="foto-cajas" src="{{ url_for('static', filename='cajas-redistribucion.webp') }}"
        alt="Cajas de tratamiento de diálisis peritoneal apiladas, listas para redistribuirse" width="900" height="698">
@@ -160,35 +218,31 @@
   </div>
 </section>
 
-<section class="card inicio-seccion" id="tutorial" style="text-align:center;">
-  <h2>Así funciona: video tutorial</h2>
-  <p>Mira, paso a paso, cómo inscribirte, cómo saber si estás programado y cómo donar o recibir cajas.</p>
-  <video controls preload="metadata" playsinline poster="{{ url_for('static', filename='videos/tutorial-repvc.jpg') }}"
-         style="width:100%; max-width:340px; border-radius:12px; background:#000; margin:6px auto 0; display:block;">
-    <source src="{{ url_for('static', filename='videos/tutorial-repvc.mp4') }}" type="video/mp4">
-  </video>
-</section>
-
 <section class="card inicio-seccion">
-  <h2>Si quieres participar en el programa, sigue estos pasos</h2>
-  <ol class="inicio-pasos">
-    <li>
-      <strong>Revisa si tenemos ruta en tu zona</strong>
-      <span>Escribe tu código postal:</span>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-        <input type="text" id="cp-verificar" placeholder="Código postal" maxlength="5" pattern="[0-9]*" inputmode="numeric" style="flex:1; min-width:140px; max-width:160px;">
-        <button type="button" id="btn-verificar-cp" class="small" style="margin-top:0;">Verificar</button>
-      </div>
-      <p id="resultado-cp" style="font-size:0.88rem; margin:8px 0 0;"></p>
-      <div id="opciones-cp" style="margin-top:6px;"></div>
-    </li>
-    <li><strong>Crea un usuario con tu número de WhatsApp</strong><span>Ahí recibirás toda la información necesaria.</span></li>
-    <li><strong>Llena el formulario</strong><span>En cuanto lo tengamos, programaremos la entrega de un bote a tu domicilio para que puedas recolectar tu material.</span></li>
-  </ol>
+  <h2>¿Qué cambia cuando participas?</h2>
+  <div class="sincon">
+    <div class="sin">
+      <h3>Sin RE-PVC</h3>
+      <ul>
+        <li>Las bolsas se acumulan en tu casa</li>
+        <li>Terminan en la basura</li>
+        <li>Las cajas que te sobran se quedan sin destino</li>
+      </ul>
+    </div>
+    <div class="con">
+      <h3>Con RE-PVC</h3>
+      <ul>
+        <li>Pasamos por tus bolsas a tu domicilio</li>
+        <li>Tu material se vuelve cables, suelas de calzado, mangueras y perfiles</li>
+        <li>Tus cajas sobrantes llegan a quien las necesita</li>
+        <li>Te unes a <strong>{{ "{:,}".format(pacientes_participantes) }}</strong> pacientes que ya cuidan el ambiente</li>
+      </ul>
+    </div>
+  </div>
 </section>
 
 <section class="card inicio-cierre">
-  <h2 style="margin-bottom:6px;">¿Te gustaría formar parte?</h2>
+  <h2 style="margin-bottom:6px;">Únete a los {{ "{:,}".format(pacientes_participantes) }} pacientes que ya participan</h2>
   <p style="color:var(--muted); margin-top:0;">Inscribirte toma unos minutos desde tu celular.</p>
   <a class="btn" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
 </section>
