@@ -102,6 +102,7 @@
   <h1 class="pregunta">¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden reciclar?</h1>
   <p class="dato">Un paciente puede producir hasta <strong>100 kg</strong> de este material al año.</p>
   <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
+  <a class="ya-soy" href="#tutorial" style="margin-top:10px;">▶ Ver cómo funciona (video de 2 minutos)</a>
   <a class="ya-soy" href="{{ url_for('login', tipo='cliente') }}">Ya soy parte del programa — iniciar sesión</a>
 </section>
 
@@ -160,6 +161,15 @@
   </div>
   {% if impacto_fuente %}<p class="inicio-fuente">Fuente: {{ impacto_fuente }}</p>{% endif %}
   <p class="inicio-fuente">Equivalencias calculadas con promedios de referencia: una casa en México consume ≈ 289 kWh al mes (CFE); una persona usa ≈ 360 L de agua al día (CONAGUA); un árbol adulto absorbe ≈ 21 kg de CO₂ al año.</p>
+</section>
+
+<section class="card inicio-seccion" id="tutorial" style="text-align:center;">
+  <h2>Así funciona: video tutorial</h2>
+  <p>Mira, paso a paso, cómo inscribirte, cómo saber si estás programado y cómo donar o recibir cajas.</p>
+  <video controls preload="metadata" playsinline poster="{{ url_for('static', filename='videos/tutorial-repvc.jpg') }}"
+         style="width:100%; max-width:340px; border-radius:12px; background:#000; margin:6px auto 0; display:block;">
+    <source src="{{ url_for('static', filename='videos/tutorial-repvc.mp4') }}" type="video/mp4">
+  </video>
 </section>
 
 <section class="card inicio-seccion">

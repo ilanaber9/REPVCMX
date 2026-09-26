@@ -7,6 +7,7 @@
   <button type="button" class="tab-btn" data-tab="material">Material recolectado</button>
   <button type="button" class="tab-btn" data-tab="cajas">Mis cajas</button>
   <button type="button" class="tab-btn" data-tab="redistribucion">Redistribución de cajas</button>
+  <button type="button" class="tab-btn" data-tab="tutorial">Tutorial</button>
   {% if MOSTRAR_NEF and current_user['recibir_info_nef'] %}
   <button type="button" class="tab-btn" data-tab="nef" id="tab-btn-nef">NEF{% if nef_nuevas %} ({{ nef_nuevas }}){% endif %}</button>
   {% endif %}
@@ -154,6 +155,17 @@
     {% if not cajas_donadas and not cajas_recibidas %}
     <p class="empty">Aún no tienes cajas donadas ni recibidas registradas.</p>
     {% endif %}
+  </div>
+</div>
+
+<div class="tab-panel" data-tab="tutorial">
+  <div class="card" style="text-align:center;">
+    <h1 style="margin:0;">Tutorial</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Cómo usar tu cuenta: ver si estás programado, tu material recolectado y cómo donar o recibir cajas.</p>
+    <video controls preload="metadata" playsinline poster="{{ url_for('static', filename='videos/tutorial-repvc.jpg') }}"
+           style="width:100%; max-width:340px; border-radius:12px; background:#000; display:block; margin:10px auto 0;">
+      <source src="{{ url_for('static', filename='videos/tutorial-repvc.mp4') }}" type="video/mp4">
+    </video>
   </div>
 </div>
 
