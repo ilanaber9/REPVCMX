@@ -3453,11 +3453,45 @@ def admin_eliminar_ruta(user, ruta_id):
                 "UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo_extra, p["solicitud_extra_id"])
             )
 
+    for p in paradas_ruta:
+        _revertir_efectos_parada(db, p)
+
     db.execute("DELETE FROM paradas WHERE ruta_id = ?", (ruta_id,))
     db.execute("DELETE FROM rutas WHERE id = ?", (ruta_id,))
     db.commit()
     flash(f"Ruta '{ruta['nombre']}' eliminada de la planeación.", "success")
     return redirect(url_for("admin_dashboard", tab="rutas"))
+
+
+def _revertir_efectos_parada(db, p):
+    """Deshace lo que una parada ya atendida dejó registrado antes de borrarla: los kg sumados al
+    paciente, los movimientos de inventario de botes y cajas, y el 'bote entregado' (el paciente
+    vuelve a quedar pendiente de entrega)."""
+    if p["kg_recolectados"]:
+        cliente = db.execute(
+            "SELECT cliente_id FROM solicitudes WHERE id = ?", (p["solicitud_id"],)
+        ).fetchone()
+        if cliente and cliente["cliente_id"]:
+            db.execute(
+                "UPDATE users SET material_recolectado_kg = MAX(0, material_recolectado_kg - ?) WHERE id = ?",
+                (p["kg_recolectados"], cliente["cliente_id"]),
+            )
+    for sufijo in ("", " (extra)"):
+        nota = f"Parada #{p['id']}{sufijo}"
+        db.execute("DELETE FROM inventario_botes WHERE notas = ?", (nota,))
+        db.execute("DELETE FROM inventario_cajas WHERE notas = ?", (nota,))
+    if p["estado"] == "completada" and p["tipo"] == "entrega":
+        db.execute(
+            "UPDATE solicitudes SET estado = 'pendiente_entrega', fecha_reinicio_espera = NULL "
+            "WHERE id = ? AND estado = 'pendiente'",
+            (p["solicitud_id"],),
+        )
+    if p["solicitud_extra_id"] and p["estado_extra"] == "completada" and p["tipo_extra"] == "entrega":
+        db.execute(
+            "UPDATE solicitudes SET estado = 'pendiente_entrega', fecha_reinicio_espera = NULL "
+            "WHERE id = ? AND estado = 'pendiente'",
+            (p["solicitud_extra_id"],),
+        )
 
 
 @app.route("/admin/paradas/<int:parada_id>/quitar", methods=["POST"])

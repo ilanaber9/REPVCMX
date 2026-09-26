@@ -10,7 +10,7 @@
   <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
     <h1 style="margin:0;">{{ ruta['nombre'] }}</h1>
     <form method="post" action="{{ url_for('admin_eliminar_ruta', ruta_id=ruta['id']) }}"
-          onsubmit="return confirm('¿Eliminar la ruta \'{{ ruta['nombre'] }}\' de la planeación? Las paradas aún no atendidas volverán a quedar pendientes.');">
+          onsubmit="return confirm('¿Eliminar la ruta \'{{ ruta['nombre'] }}\' de la planeación? Las paradas aún no atendidas volverán a quedar pendientes y se revertirán los kg, cajas y botes que ya se hayan registrado en ella.');">
       <button class="small danger" type="submit">Eliminar ruta</button>
     </form>
   </div>

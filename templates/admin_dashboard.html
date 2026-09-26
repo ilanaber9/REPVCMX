@@ -26,7 +26,7 @@
   <div style="display:flex; gap:8px; margin-top:10px;">
     <a class="btn secondary small" href="{{ url_for('admin_ver_ruta', ruta_id=r['id']) }}">Agregar o eliminar paciente</a>
     <form class="inline" method="post" action="{{ url_for('admin_eliminar_ruta', ruta_id=r['id']) }}"
-          onsubmit="return confirm('¿Eliminar la ruta \'{{ r['nombre'] }}\' de la planeación? Las paradas aún no atendidas volverán a quedar pendientes.');">
+          onsubmit="return confirm('¿Eliminar la ruta \'{{ r['nombre'] }}\' de la planeación? Las paradas aún no atendidas volverán a quedar pendientes y se revertirán los kg, cajas y botes que ya se hayan registrado en ella.');">
       <button class="small danger" type="submit">Eliminar</button>
     </form>
   </div>
