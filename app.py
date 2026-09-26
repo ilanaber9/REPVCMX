@@ -1799,6 +1799,9 @@ def aplicar_migraciones_pendientes():
             ")"
         )
 
+    # Rutas finalizadas antes de que finalizar les cambiara el estado a 'completada'.
+    db.execute("UPDATE rutas SET estado = 'completada' WHERE hora_fin_real IS NOT NULL AND estado = 'en_curso'")
+
     db.commit()
     db.close()
 
@@ -5230,7 +5233,7 @@ def recolector_finalizar_ruta(user, ruta_id):
         return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
 
     ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
-    db.execute("UPDATE rutas SET hora_fin_real = ? WHERE id = ?", (ahora, ruta_id))
+    db.execute("UPDATE rutas SET hora_fin_real = ?, estado = 'completada' WHERE id = ?", (ahora, ruta_id))
     db.execute(
         "UPDATE solicitudes SET estado = 'pendiente' WHERE estado IN ('recolectada', 'incidencia') "
         "AND id IN (SELECT solicitud_id FROM paradas WHERE ruta_id = ?)",
