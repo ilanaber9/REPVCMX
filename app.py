@@ -212,6 +212,7 @@ CAJAS_MAX_RECEPCION_RUTA = 15  # máximo de cajas a recoger (donar) por ruta
 OSRM_URL = "https://router.project-osrm.org/route/v1/driving/{}?overview=full&geometries=geojson"
 
 _osrm_cache = {}
+_osrm_sin_servicio_hasta = [0.0]
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -284,6 +285,49 @@ def _http_get(url, headers=None, timeout=8):
         return None
 
 
+def _osrm_clave_bd(clave):
+    return hashlib.sha1(repr(clave).encode("utf-8")).hexdigest()
+
+
+def _osrm_cache_bd_leer(clave):
+    """Recupera un cálculo de ruta ya hecho antes (persiste entre reinicios del servidor, a
+    diferencia de _osrm_cache en memoria). Cualquier problema con la base se ignora: solo se
+    pierde el ahorro de tiempo, no el cálculo."""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=0.2)
+        try:
+            fila = conn.execute(
+                "SELECT resultado FROM osrm_cache WHERE clave = ?", (_osrm_clave_bd(clave),)
+            ).fetchone()
+        finally:
+            conn.close()
+        if fila:
+            km, minutos, geometria, tramos = json.loads(fila[0])
+            return (km, minutos, geometria, tramos)
+    except Exception:
+        pass
+    return None
+
+
+def _osrm_cache_bd_guardar(clave, resultado):
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=0.2)
+        try:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS osrm_cache ("
+                "clave TEXT PRIMARY KEY, resultado TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))"
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO osrm_cache (clave, resultado) VALUES (?, ?)",
+                (_osrm_clave_bd(clave), json.dumps(list(resultado))),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def osrm_distancia_duracion(secuencia):
     """secuencia: lista de (lat, lon) en orden de visita. Devuelve (km, minutos_manejo, geometria, tramos_min)
     usando calles reales (OSRM público, sin API key) o None si falla/no hay internet.
@@ -293,6 +337,12 @@ def osrm_distancia_duracion(secuencia):
     clave = tuple(secuencia)
     if clave in _osrm_cache:
         return _osrm_cache[clave]
+    guardado = _osrm_cache_bd_leer(clave)
+    if guardado is not None:
+        _osrm_cache[clave] = guardado
+        return guardado
+    if time_module.time() < _osrm_sin_servicio_hasta[0]:
+        return None
     coords_str = ";".join(f"{lon},{lat}" for lat, lon in secuencia)
     url = OSRM_URL.format(coords_str)
     try:
@@ -303,8 +353,12 @@ def osrm_distancia_duracion(secuencia):
         tramos_min = [leg["duration"] / 60 for leg in ruta["legs"]]
         resultado = (ruta["distance"] / 1000, ruta["duration"] / 60, geometria, tramos_min)
     except Exception:
+        # Si el servicio de calles no responde, no se le vuelve a preguntar durante un minuto:
+        # así una caída no hace lenta cada página que estima rutas (cada intento tarda hasta 16 s).
+        _osrm_sin_servicio_hasta[0] = time_module.time() + 60
         return None
     _osrm_cache[clave] = resultado
+    _osrm_cache_bd_guardar(clave, resultado)
     return resultado
 
 
@@ -6106,7 +6160,23 @@ def webhook_whatsapp():
 
 app.add_template_filter(utc_a_cdmx, "cdmx")
 
+def _precalentar_estimados_rutas():
+    """Al arrancar, calcula en segundo plano el recorrido por calles de las rutas existentes para
+    que el panel no tarde la primera vez que se abre (los resultados se guardan en la base)."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        try:
+            for r in conn.execute("SELECT id FROM rutas ORDER BY id DESC").fetchall():
+                estimar_ruta_por_id(conn, r["id"])
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[precalentar_estimados] error: {e}")
+
+
 init_db()
+threading.Thread(target=_precalentar_estimados_rutas, daemon=True).start()
 threading.Thread(target=_hilo_avisos_programados, daemon=True).start()
 threading.Thread(target=_hilo_respaldo_diario, daemon=True).start()
 
