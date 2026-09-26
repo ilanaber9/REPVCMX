@@ -4,9 +4,9 @@
    aquí la fuente de las cifras en impacto_fuente cuando RE-PVC la tenga. #}
 {% set impacto = [
   {"icono": "⚡", "titulo": "Energía", "factor": 21, "unidad": "kWh", "detalle": "de energía ahorrada",
-   "divisor": 3468, "equiv_antes": "Equivale a la electricidad que consumen ≈", "equiv_despues": "casas en México durante 1 año"},
+   "divisor": 3468, "equiv_antes": "Equivale a la electricidad de ≈", "equiv_despues": "casas en 1 año"},
   {"icono": "💧", "titulo": "Agua", "factor": 13, "unidad": "L", "detalle": "de agua ahorrada",
-   "divisor": 131400, "equiv_antes": "Equivale al agua que usan ≈", "equiv_despues": "personas durante 1 año"},
+   "divisor": 131400, "equiv_antes": "Equivale al agua de ≈", "equiv_despues": "personas en 1 año"},
   {"icono": "🌎", "titulo": "Emisiones de CO₂", "factor": 5, "unidad": "kg", "detalle": "de emisiones de CO₂ evitadas",
    "divisor": 21, "equiv_antes": "Equivale a lo que absorben ≈", "equiv_despues": "árboles adultos en un año"},
 ] %}
@@ -159,7 +159,6 @@
     {% endfor %}
   </div>
   {% if impacto_fuente %}<p class="inicio-fuente">Fuente: {{ impacto_fuente }}</p>{% endif %}
-  <p class="inicio-fuente">Equivalencias calculadas con promedios de referencia: una casa en México consume ≈ 289 kWh al mes, unos 3,468 al año (CFE); una persona usa ≈ 360 L de agua al día, unos 131,400 al año (CONAGUA); un árbol adulto absorbe ≈ 21 kg de CO₂ al año.</p>
 </section>
 
 <section class="card inicio-seccion" id="tutorial" style="text-align:center;">
