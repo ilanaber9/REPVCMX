@@ -42,6 +42,7 @@
   .kg-contador .kg-cifra { font-size: 2.6rem; font-weight: 800; color: var(--green-dark); line-height: 1.15; margin: 4px 0; }
   .kg-contador .kg-cifra small { font-size: 1.2rem; font-weight: 700; }
 
+  .cuadro-redistribucion { border: 2px solid var(--green); background: #f8fcf9; }
   .inicio-seccion h2 { font-size: 1.25rem; margin-bottom: 6px; }
   .inicio-seccion > p { color: var(--muted); line-height: 1.55; margin-top: 0; }
 
@@ -114,6 +115,21 @@
     de cables, suelas de calzado, mangueras y perfiles. Además, redistribuimos cajas de tratamiento
     en buen estado y no caducadas.
   </p>
+</section>
+
+<section class="card inicio-seccion cuadro-redistribucion">
+  <h2>¿Te sobran o te faltan?</h2>
+  <p>
+    Si tienes cajas de tratamiento de diálisis que no vas a utilizar, puedes donarlas. Si te hacen
+    falta, puedes solicitarlas. En RE-PVC aprovechamos nuestras rutas de recolección para
+    redistribuir los tratamientos de donde no se requieren a quien los puede utilizar, siempre y
+    cuando las cajas estén en buen estado y su fecha de caducidad no haya pasado.
+  </p>
+  <p>
+    Para participar, regístrate en el programa y, desde tu cuenta, en la sección
+    <strong>Redistribución de cajas</strong> indica si quieres donar o recibir.
+  </p>
+  <a class="btn" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
 </section>
 
 <section class="card inicio-seccion">
