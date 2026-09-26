@@ -105,16 +105,6 @@
   <a class="ya-soy" href="{{ url_for('login', tipo='cliente') }}">Ya soy parte del programa — iniciar sesión</a>
 </section>
 
-<section class="kg-contador">
-  <p class="kg-titulo">Pacientes participantes</p>
-  <p class="kg-cifra"><span id="pacientes-valor">{{ "{:,}".format(pacientes_participantes) }}</span></p>
-</section>
-
-<section class="kg-contador">
-  <p class="kg-titulo">Material reciclado hasta hoy</p>
-  <p class="kg-cifra"><span id="kg-valor">{{ "{:,.1f}".format(kg_reciclados) }}</span> <small>kg</small></p>
-</section>
-
 <section class="card inicio-seccion">
   <h2>¿Qué hacemos?</h2>
   <p>
@@ -123,6 +113,16 @@
     de cables, suelas de calzado, mangueras y perfiles. Además, redistribuimos cajas de tratamiento
     en buen estado y no caducadas.
   </p>
+</section>
+
+<section class="kg-contador">
+  <p class="kg-titulo">Pacientes participantes</p>
+  <p class="kg-cifra"><span id="pacientes-valor">{{ "{:,}".format(pacientes_participantes) }}</span></p>
+</section>
+
+<section class="kg-contador">
+  <p class="kg-titulo">Material reciclado hasta hoy</p>
+  <p class="kg-cifra"><span id="kg-valor">{{ "{:,.1f}".format(kg_reciclados) }}</span> <small>kg</small></p>
 </section>
 
 <section class="card inicio-seccion cuadro-redistribucion">
