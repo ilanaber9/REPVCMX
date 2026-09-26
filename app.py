@@ -551,7 +551,8 @@ def fusionar_grupo_pequeno_con_ruta_vecina(db, grupo):
     if centro is None:
         return None
     candidatas = db.execute(
-        "SELECT * FROM rutas WHERE estado = 'planificada' AND hora_inicio_real IS NULL"
+        "SELECT * FROM rutas WHERE estado = 'planificada' AND hora_inicio_real IS NULL AND fecha >= ?",
+        (ahora_negocio().date().isoformat(),),
     ).fetchall()
     if not candidatas:
         return None
@@ -5268,14 +5269,75 @@ def recolector_finalizar_ruta(user, ruta_id):
 
     ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
     db.execute("UPDATE rutas SET hora_fin_real = ?, estado = 'completada' WHERE id = ?", (ahora, ruta_id))
+    sin_atender = _liberar_paradas_sin_atender(db, ruta_id)
     db.execute(
         "UPDATE solicitudes SET estado = 'pendiente' WHERE estado IN ('recolectada', 'incidencia') "
         "AND id IN (SELECT solicitud_id FROM paradas WHERE ruta_id = ?)",
         (ruta_id,),
     )
+    reprogramados, pendientes, parada_ids_nuevas = _reubicar_sin_atender(db, sin_atender)
+    if sin_atender:
+        crear_notificacion_admin(
+            db, None,
+            f"La ruta '{ruta['nombre']}' se finalizó con {len(sin_atender)} paciente(s) sin atender: "
+            f"{reprogramados} se reprogramaron en otras rutas y {pendientes} quedaron pendientes.",
+        )
     db.commit()
-    flash("Ruta finalizada. El reporte queda guardado y todos sus pacientes vuelven a quedar disponibles para programarse el próximo mes.", "success")
+    if parada_ids_nuevas:
+        threading.Thread(target=_notificar_paradas_programadas, args=(parada_ids_nuevas,), daemon=True).start()
+    mensaje = "Ruta finalizada. El reporte queda guardado y todos sus pacientes vuelven a quedar disponibles para programarse el próximo mes."
+    if sin_atender:
+        mensaje += (
+            f" {len(sin_atender)} paciente(s) no se atendieron: {reprogramados} se reprogramaron en otras rutas "
+            f"y {pendientes} quedaron pendientes."
+        )
+    flash(mensaje, "success")
     return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
+
+
+def _liberar_paradas_sin_atender(db, ruta_id):
+    """Las paradas que siguen pendientes al cerrar una ruta no se atendieron: se sacan de esa ruta
+    (quedan como incidencia, con nota) y sus solicitudes regresan a pendientes para reprogramarse.
+    Devuelve las solicitudes liberadas como filas listas para agrupar por cliente."""
+    ids = []
+    for p in db.execute("SELECT * FROM paradas WHERE ruta_id = ?", (ruta_id,)).fetchall():
+        nota = "Ruta finalizada sin atender esta parada — se reprograma en otra ruta."
+        if p["estado"] == "pendiente":
+            estado_previo = "pendiente_entrega" if p["tipo"] == "entrega" else "pendiente"
+            db.execute("UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo, p["solicitud_id"]))
+            db.execute("UPDATE paradas SET estado = 'incidencia', notas = ? WHERE id = ?", (nota, p["id"]))
+            ids.append(p["solicitud_id"])
+        if p["solicitud_extra_id"] and p["estado_extra"] == "pendiente":
+            estado_previo_extra = "pendiente_entrega" if p["tipo_extra"] == "entrega" else "pendiente"
+            db.execute(
+                "UPDATE solicitudes SET estado = ? WHERE id = ?", (estado_previo_extra, p["solicitud_extra_id"])
+            )
+            db.execute("UPDATE paradas SET estado_extra = 'incidencia' WHERE id = ?", (p["id"],))
+            ids.append(p["solicitud_extra_id"])
+    if not ids:
+        return []
+    marcadores = ",".join("?" * len(ids))
+    return db.execute(
+        f"SELECT id, estado, lat, lon, cliente_id, direccion FROM solicitudes WHERE id IN ({marcadores}) "
+        "ORDER BY COALESCE(fecha_reinicio_espera, created_at)",
+        tuple(ids),
+    ).fetchall()
+
+
+def _reubicar_sin_atender(db, filas):
+    """Intenta meter a cada paciente sin atender en la ruta futura ya planificada más cercana donde
+    quepa (sin pasar del tope de tiempo). Los que no caben en ninguna quedan pendientes, a la espera
+    de la siguiente tanda de rutas. Devuelve (reprogramados, pendientes, ids_de_paradas_nuevas)."""
+    reprogramados = pendientes = 0
+    parada_ids_nuevas = []
+    for unidad in fusionar_puntos_mismo_cliente(filas):
+        resultado, ids = intentar_despachar_grupo_pequeno(db, [unidad])
+        if resultado == "fusionado":
+            reprogramados += 1
+            parada_ids_nuevas.extend(ids)
+        else:
+            pendientes += 1
+    return reprogramados, pendientes, parada_ids_nuevas
 
 
 @app.route("/recolector/rutas/<int:ruta_id>/suspender", methods=["POST"])
