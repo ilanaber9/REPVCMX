@@ -3,11 +3,17 @@
    material nuevo ("factor"). En la página se multiplican por el total de kg reciclados. Agregar
    aquí la fuente de las cifras en impacto_fuente cuando RE-PVC la tenga. #}
 {% set impacto = [
-  {"icono": "⚡", "titulo": "Energía", "factor": 21, "unidad": "kWh", "detalle": "de energía ahorrada"},
-  {"icono": "💧", "titulo": "Agua", "factor": 13, "unidad": "L", "detalle": "de agua ahorrada"},
-  {"icono": "🌎", "titulo": "Emisiones de CO₂", "factor": 5, "unidad": "kg", "detalle": "de emisiones de CO₂ evitadas"},
+  {"icono": "⚡", "titulo": "Energía", "factor": 21, "unidad": "kWh", "detalle": "de energía ahorrada",
+   "divisor": 9.633, "equiv_antes": "≈", "equiv_despues": "días de electricidad de una casa promedio en México"},
+  {"icono": "💧", "titulo": "Agua", "factor": 13, "unidad": "L", "detalle": "de agua ahorrada",
+   "divisor": 360, "equiv_antes": "≈", "equiv_despues": "días de consumo de agua de una persona"},
+  {"icono": "🌎", "titulo": "Emisiones de CO₂", "factor": 5, "unidad": "kg", "detalle": "de emisiones de CO₂ evitadas",
+   "divisor": 21, "equiv_antes": "lo que absorben ≈", "equiv_despues": "árboles adultos en un año"},
 ] %}
+{# divisor: cuánto equivale a "1" de la comparación (289 kWh/mes ÷ 30 días por casa; 360 L/día por persona;
+   21 kg de CO₂/año por árbol). #}
 {% set impacto_fuente = "" %}
+{% macro equiv(n) -%}{% if n < 10 %}{{ "{:,.1f}".format(n) }}{% else %}{{ "{:,.0f}".format(n) }}{% endif %}{%- endmacro %}
 {% block title %}RE-PVC — Del cuidado de la gente al cuidado del ambiente{% endblock %}
 {% block head %}
 <style>
@@ -63,6 +69,7 @@
   .inicio-impacto .cifra { display: block; font-size: 1.7rem; font-weight: 700; color: var(--green-dark); margin-top: 6px; line-height: 1.2; }
   .inicio-impacto .unidad { font-size: 0.95rem; font-weight: 600; }
   .inicio-impacto .titulo { display: block; font-weight: 600; margin-top: 4px; }
+  .inicio-impacto .equivalencia { display: block; margin-top: 8px; padding-top: 8px; border-top: 1px solid #d4e9dc; font-size: 0.85rem; line-height: 1.35; }
   .inicio-impacto .detalle { display: block; color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
   .inicio-fuente { color: var(--muted); font-size: 0.78rem; margin: 12px 0 0; }
 
@@ -79,7 +86,7 @@
     .inicio-hero h1.pregunta { font-size: 1.85rem; }
     .inicio-impacto { grid-template-columns: 1fr; }
     .inicio-impacto > div { display: grid; grid-template-columns: 44px 1fr; text-align: left; align-items: center; column-gap: 10px; }
-    .inicio-impacto .icono { grid-row: span 3; text-align: center; }
+    .inicio-impacto .icono { grid-row: span 4; text-align: center; }
     .inicio-impacto .cifra { margin-top: 0; }
     .inicio-hero .btn-participar, .inicio-cierre .btn { display: block; width: 100%; }
   }
@@ -119,10 +126,12 @@
       <span class="cifra"><span class="valor-impacto" data-factor="{{ dato.factor }}">{{ "{:,.0f}".format(kg_reciclados * dato.factor) }}</span> <span class="unidad">{{ dato.unidad }}</span></span>
       <span class="titulo">{{ dato.titulo }}</span>
       <span class="detalle">{{ dato.detalle }}</span>
+      <span class="equivalencia">Equivale a {{ dato.equiv_antes }} <strong><span class="valor-equiv" data-divisor="{{ dato.divisor }}" data-factor="{{ dato.factor }}">{{ equiv(kg_reciclados * dato.factor / dato.divisor) }}</span></strong> {{ dato.equiv_despues }}</span>
     </div>
     {% endfor %}
   </div>
   {% if impacto_fuente %}<p class="inicio-fuente">Fuente: {{ impacto_fuente }}</p>{% endif %}
+  <p class="inicio-fuente">Equivalencias calculadas con promedios de referencia: una casa en México consume ≈ 289 kWh al mes (CFE); una persona usa ≈ 360 L de agua al día (CONAGUA); un árbol adulto absorbe ≈ 21 kg de CO₂ al año.</p>
 </section>
 
 <section class="card inicio-seccion">
@@ -173,6 +182,10 @@ async function actualizarKg() {
     const data = await resp.json();
     document.getElementById('kg-valor').textContent = data.kg.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1});
     document.getElementById('kg-impacto').textContent = data.kg.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    document.querySelectorAll('.valor-equiv').forEach(function (el) {
+      var n = data.kg * Number(el.dataset.factor) / Number(el.dataset.divisor);
+      el.textContent = n.toLocaleString('en-US', {maximumFractionDigits: n < 10 ? 1 : 0, minimumFractionDigits: n < 10 ? 1 : 0});
+    });
     document.querySelectorAll('.valor-impacto').forEach(function (el) {
       el.textContent = (data.kg * Number(el.dataset.factor)).toLocaleString('en-US', {maximumFractionDigits: 0});
     });
