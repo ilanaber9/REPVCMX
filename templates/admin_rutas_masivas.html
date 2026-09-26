@@ -30,6 +30,15 @@
   <a href="{{ url_for('admin_dashboard', tab='rutas') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
   <h1>Programar ruta</h1>
 
+  <div style="border:2px solid var(--green); background:#f1f8f4; border-radius:8px; padding:14px; margin-bottom:18px;">
+    <strong>Armar ruta sugerida</strong>
+    <p style="color:var(--muted); font-size:0.9rem; margin:4px 0 10px;">
+      El sistema parte del paciente que más lleva esperando y suma a los más cercanos, sin depender de la zona,
+      hasta llenar la ruta con el tiempo máximo. La revisas antes de programarla.
+    </p>
+    <a class="btn" href="{{ url_for('admin_ruta_sugerida') }}" onclick="this.textContent='Armando la ruta… (puede tardar unos segundos)'; this.style.pointerEvents='none';">Armar ruta sugerida</a>
+  </div>
+
   {% if zonas %}
   <form id="form-programar" method="post" novalidate>
     <label>Ruta</label>

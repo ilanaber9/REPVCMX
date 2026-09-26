@@ -4327,6 +4327,182 @@ def admin_rutas_masivas(user):
     )
 
 
+def _listo_desde_sql():
+    dias_caso = f"CASE WHEN modalidad = 'compra' THEN {DIAS_ESPERA_COMPRA} ELSE {DIAS_ESPERA_DONACION} END"
+    return (
+        "CASE WHEN fecha_reinicio_espera IS NULL THEN created_at "
+        f"ELSE datetime(fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') END"
+    )
+
+
+def armar_ruta_sugerida(db):
+    """Arma la siguiente ruta sin depender de zonas: parte del paciente que más lleva esperando su
+    recolección y le va sumando, siempre el más cercano al grupo que ya tiene, mientras la ruta siga
+    cabiendo en el tope de tiempo (7:30 h, o el extendido si hay pacientes lejanos). Los que no
+    caben se saltan y se prueba con el siguiente más cercano, para juntar la mayor cantidad posible.
+    Devuelve None si no hay a quién programar, o un dict con el grupo (ya en orden de visita), su
+    estimado real por calles, quién es el paciente de partida y cuántos quedaron fuera por cajas."""
+    listo_desde = _listo_desde_sql()
+    filas = db.execute(
+        f"SELECT id, estado, lat, lon, cliente_id, direccion, {listo_desde} AS listo_desde, "
+        f"CAST(julianday('now', 'localtime') - julianday({listo_desde}) AS INTEGER) AS dias_espera "
+        "FROM solicitudes WHERE estado IN ('pendiente', 'pendiente_entrega') "
+        f"AND lat IS NOT NULL AND lon IS NOT NULL AND {condicion_lista_para_recoleccion()} "
+        "ORDER BY listo_desde, id"
+    ).fetchall()
+    if not filas:
+        return None
+    espera = {f["id"]: (f["listo_desde"], f["dias_espera"]) for f in filas}
+    unidades = fusionar_puntos_mismo_cliente(filas)
+    for u in unidades:
+        u["listo_desde"], u["dias_espera"] = espera.get(u["id"], (None, 0))
+    unidades.sort(key=lambda u: (u["listo_desde"] or "", u["id"]))
+
+    semilla = unidades[0]
+    grupo = [semilla]
+    restantes = unidades[1:]
+    dmin = {u["id"]: haversine_km(semilla["lat"], semilla["lon"], u["lat"], u["lon"]) for u in restantes}
+    rechazados = []
+    while restantes:
+        candidato = min(restantes, key=lambda u: dmin[u["id"]])
+        restantes.remove(candidato)
+        prueba = grupo + [candidato]
+        if _duracion_aproximada_paquete(prueba) > _tope_efectivo_grupo(
+            prueba, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN
+        ):
+            rechazados.append(candidato)
+            continue
+        grupo.append(candidato)
+        for u in restantes + rechazados:
+            dmin[u["id"]] = min(dmin[u["id"]], haversine_km(candidato["lat"], candidato["lon"], u["lat"], u["lon"]))
+
+    # La estimación rápida es conservadora (línea recta con margen de tráfico): revisa con la
+    # duración real por calles a los más cercanos que quedaron fuera, por si todavía caben.
+    intentos = 0
+    for candidato in sorted(rechazados, key=lambda u: dmin[u["id"]]):
+        if intentos >= 10:
+            break
+        intentos += 1
+        prueba = ordenar_por_cercania(grupo + [candidato])
+        est = estimar_ruta(prueba)
+        if est and est["minutos"] <= _tope_efectivo_grupo(
+            prueba, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN
+        ):
+            grupo.append(candidato)
+
+    grupo, sobrantes_cajas = limitar_cajas_grupo(db, grupo)
+    if semilla not in grupo:
+        grupo.insert(0, semilla)
+    ordenado = ordenar_por_cercania(grupo)
+    estimado = estimar_ruta(ordenado)
+    while len(ordenado) > 1 and estimado and estimado["minutos"] > _tope_efectivo_grupo(
+        ordenado, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN
+    ):
+        quitar = next(u for u in reversed(grupo) if u is not semilla)
+        grupo.remove(quitar)
+        ordenado = ordenar_por_cercania(grupo)
+        estimado = estimar_ruta(ordenado)
+    return {
+        "grupo": ordenado, "estimado": estimado, "semilla": semilla,
+        "sin_cajas": len(sobrantes_cajas),
+    }
+
+
+def _ids_de_grupo(grupo):
+    ids = []
+    for u in grupo:
+        ids.append(u["id"])
+        if u.get("extra_id"):
+            ids.append(u["extra_id"])
+    return ids
+
+
+@app.route("/admin/rutas/sugerida")
+@login_required("admin")
+def admin_ruta_sugerida(user):
+    db = get_db()
+    recolectores = db.execute("SELECT * FROM users WHERE role = 'recolector' ORDER BY name").fetchall()
+    sugerida = armar_ruta_sugerida(db)
+    filas = []
+    if sugerida:
+        for i, u in enumerate(sugerida["grupo"], start=1):
+            sol = db.execute(
+                "SELECT s.direccion, COALESCE(u.name, s.nombre_contacto) AS nombre FROM solicitudes s "
+                "LEFT JOIN users u ON u.id = s.cliente_id WHERE s.id = ?", (u["id"],)
+            ).fetchone()
+            filas.append({
+                "orden": i, "nombre": sol["nombre"], "direccion": sol["direccion"], "tipo": u["tipo"],
+                "dias_espera": u.get("dias_espera") or 0,
+            })
+    return render_template(
+        "admin_ruta_sugerida.html", sugerida=sugerida, filas=filas, recolectores=recolectores,
+        hoy=ahora_negocio().date().isoformat(), minimo=MIN_PARADAS_DESPACHO,
+        ids=",".join(str(i) for i in _ids_de_grupo(sugerida["grupo"])) if sugerida else "",
+        puntos=[{"lat": u["lat"], "lon": u["lon"], "orden": i} for i, u in enumerate(sugerida["grupo"], 1)] if sugerida else [],
+        geometria=sugerida["estimado"]["geometria"] if sugerida and sugerida["estimado"] else None,
+    )
+
+
+@app.route("/admin/rutas/sugerida/crear", methods=["POST"])
+@login_required("admin")
+def admin_crear_ruta_sugerida(user):
+    fecha = request.form.get("fecha", "").strip()
+    hora_salida = request.form.get("hora_salida", "").strip()
+    recolector_id = request.form.get("recolector_id", "").strip()
+    ids = [int(x) for x in request.form.get("ids", "").split(",") if x.strip().isdigit()]
+    faltan = [n for n, v in (("día", fecha), ("hora de salida", hora_salida), ("recolector", recolector_id)) if not v]
+    if faltan or not ids:
+        flash("Falta elegir: " + ", ".join(faltan or ["pacientes"]) + ". No se creó la ruta.", "error")
+        return redirect(url_for("admin_ruta_sugerida"))
+    db = get_db()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        flash("Ya se está generando otra ruta en este momento. Revisa el panel antes de reintentar.", "error")
+        return redirect(url_for("admin_dashboard", tab="rutas"))
+    marcadores = ",".join("?" * len(ids))
+    filas = db.execute(
+        "SELECT id, estado, lat, lon, cliente_id, direccion FROM solicitudes "
+        f"WHERE id IN ({marcadores}) AND estado IN ('pendiente', 'pendiente_entrega') "
+        "AND lat IS NOT NULL AND lon IS NOT NULL",
+        tuple(ids),
+    ).fetchall()
+    if len(filas) < len(ids):
+        db.rollback()
+        flash("Alguno de los pacientes ya no está disponible (se programó o cambió). Vuelve a armar la ruta sugerida.", "error")
+        return redirect(url_for("admin_ruta_sugerida"))
+    grupo = ordenar_por_cercania(fusionar_puntos_mismo_cliente(filas))
+    estimado = estimar_ruta(grupo)
+    if estimado and estimado["minutos"] > _tope_efectivo_grupo(
+        grupo, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN
+    ):
+        db.rollback()
+        flash("La ruta ya no cabe en el tiempo máximo. Vuelve a armar la ruta sugerida.", "error")
+        return redirect(url_for("admin_ruta_sugerida"))
+    km = estimado["distancia_km"] if estimado else 0
+    nombre_ruta = f"Ruta {siguiente_numero_ruta(db):02d} ({km} km)"
+    cur = db.execute(
+        "INSERT INTO rutas (nombre, zona, fecha, hora_salida, recolector_id) VALUES (?, ?, ?, ?, ?)",
+        (nombre_ruta, nombre_ruta, fecha, hora_salida, recolector_id),
+    )
+    ruta_id = cur.lastrowid
+    parada_ids = []
+    for i, p in enumerate(grupo, start=1):
+        cur_parada = db.execute(
+            "INSERT INTO paradas (ruta_id, solicitud_id, solicitud_extra_id, tipo_extra, orden, tipo) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (ruta_id, p["id"], p.get("extra_id"), p.get("tipo_extra"), i, p["tipo"]),
+        )
+        parada_ids.append(cur_parada.lastrowid)
+        for sid in (p["id"], p.get("extra_id")):
+            if sid:
+                db.execute("UPDATE solicitudes SET estado = 'programada', zona = ? WHERE id = ?", (nombre_ruta, sid))
+    db.commit()
+    threading.Thread(target=_notificar_paradas_programadas, args=(parada_ids,), daemon=True).start()
+    flash(f"'{nombre_ruta}' creada con {len(grupo)} parada(s). A cada paciente le llega su aviso por WhatsApp.", "success")
+    return redirect(url_for("admin_dashboard", tab="rutas"))
+
+
 @app.route("/admin/rutas/<int:ruta_id>")
 @login_required("admin")
 def admin_ver_ruta(user, ruta_id):

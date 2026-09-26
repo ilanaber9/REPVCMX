@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Ruta sugerida{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <a href="{{ url_for('admin_rutas_masivas') }}" style="font-size:0.85rem;">&larr; Volver a programar ruta</a>
+  <h1>Ruta sugerida</h1>
+
+  {% if not sugerida %}
+  <p class="empty">No hay pacientes listos para programar por ahora.</p>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.9rem; margin-top:0;">
+    Parte del paciente que más lleva esperando y suma a los más cercanos, hasta llenar la ruta sin pasar del tiempo máximo.
+    Revísala antes de programarla: al confirmar, a cada paciente le llega un WhatsApp con su día y horario aproximado.
+  </p>
+
+  <p>
+    <strong>{{ filas|length }} paradas</strong>
+    {% if sugerida.estimado %}· tiempo estimado ida y vuelta: <strong>{{ sugerida.estimado.duracion }}</strong> ({{ sugerida.estimado.distancia_km }} km){% endif %}
+  </p>
+  <p style="color:var(--muted); font-size:0.88rem;">
+    Empieza por {{ filas[0].nombre }}{% if sugerida.semilla.dias_espera %}, que lleva {{ sugerida.semilla.dias_espera }} día{{ '' if sugerida.semilla.dias_espera == 1 else 's' }} esperando{% endif %}.
+  </p>
+  {% if filas|length < minimo %}
+  <p style="color:var(--danger); font-size:0.9rem;">
+    Solo se juntaron {{ filas|length }} pacientes cerca; lo recomendado es al menos {{ minimo }} para que valga la pena la salida.
+  </p>
+  {% endif %}
+  {% if sugerida.sin_cajas %}
+  <p style="color:var(--muted); font-size:0.85rem;">
+    {{ sugerida.sin_cajas }} solicitud(es) de cajas no se incluyeron por exceder el máximo de cajas por ruta; quedan pendientes.
+  </p>
+  {% endif %}
+
+  <div id="mapa" style="height:300px; border-radius:8px; margin:10px 0;"></div>
+
+  <div style="overflow-x:auto;">
+    <table>
+      <tr><th>#</th><th>Paciente</th><th>Dirección</th><th>Tipo</th><th>Espera</th></tr>
+      {% for f in filas %}
+      <tr>
+        <td>{{ f.orden }}</td>
+        <td>{{ f.nombre }}</td>
+        <td>{{ f.direccion }}</td>
+        <td>{{ 'Entrega de bote' if f.tipo == 'entrega' else 'Recolección' }}</td>
+        <td>{% if f.dias_espera > 0 %}{{ f.dias_espera }} día{{ '' if f.dias_espera == 1 else 's' }}{% else %}desde hoy{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Programarla</h2>
+  <form method="post" action="{{ url_for('admin_crear_ruta_sugerida') }}" id="form-sugerida">
+    <input type="hidden" name="ids" value="{{ ids }}">
+
+    <label for="campo-fecha">Día</label>
+    <input type="date" name="fecha" id="campo-fecha" min="{{ hoy }}" required style="max-width:220px;">
+
+    <label for="campo-hora">Hora de salida</label>
+    <input type="time" name="hora_salida" id="campo-hora" value="08:00" required style="max-width:150px;">
+
+    <label for="campo-recolector">Recolector asignado</label>
+    <select name="recolector_id" id="campo-recolector" required style="max-width:320px;">
+      <option value="">Elige un recolector…</option>
+      {% for r in recolectores %}
+      <option value="{{ r['id'] }}">{{ r['name'] }}</option>
+      {% endfor %}
+    </select>
+    {% if not recolectores %}
+    <p class="empty">No hay recolectores todavía — créalos en "Alta y baja de cuentas".</p>
+    {% endif %}
+
+    <div>
+      <button type="submit" id="btn-crear-sugerida">Confirmar y programar</button>
+      <a class="btn secondary" href="{{ url_for('admin_rutas_masivas') }}">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<script>
+document.getElementById('form-sugerida').addEventListener('submit', function () {
+  document.getElementById('btn-crear-sugerida').disabled = true;
+});
+const puntos = {{ puntos | tojson }};
+const geometria = {{ geometria | tojson }};
+const map = L.map('mapa');
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+}).addTo(map);
+const depot = [19.5438982, -99.2055009];
+const marcadores = puntos.map(p => L.marker([p.lat, p.lon]).bindPopup('#' + p.orden));
+const grupo = L.featureGroup([L.marker(depot).bindPopup('Depósito'), ...marcadores]).addTo(map);
+if (geometria) {
+  L.polyline(geometria, {color: '#1f7a4d', weight: 4}).addTo(map);
+} else {
+  L.polyline([depot, ...puntos.map(p => [p.lat, p.lon]), depot], {color: '#1f7a4d', weight: 3, dashArray: '6 6'}).addTo(map);
+}
+map.fitBounds(grupo.getBounds().pad(0.2));
+</script>
+{% endif %}
+{% endblock %}
