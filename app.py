@@ -1931,7 +1931,7 @@ def inject_user():
 def home():
     user = current_user()
     if user is None:
-        return render_template("landing.html")
+        return render_template("landing.html", kg_reciclados=total_kg_reciclados(get_db()))
     if user["role"] == "admin":
         return redirect(url_for("admin_dashboard"))
     if user["role"] == "recolector":
@@ -1948,6 +1948,17 @@ def home():
         if not user["alta_completa"]:
             return redirect(url_for("cliente_alta"))
     return redirect(url_for("cliente_dashboard"))
+
+
+def total_kg_reciclados(db):
+    """El mismo total que muestra el panel de administración en 'Total acumulado': la suma de
+    todos los kg que los recolectores han registrado en las paradas."""
+    return db.execute("SELECT COALESCE(SUM(kg_recolectados), 0) AS kg FROM paradas").fetchone()["kg"]
+
+
+@app.route("/kg-reciclados")
+def kg_reciclados_publico():
+    return jsonify({"kg": round(total_kg_reciclados(get_db()), 1)})
 
 
 TIPO_LOGIN_ROLES = {"admin": "admin", "recolector": "recolector", "cliente": "cliente", "nef": "nef"}

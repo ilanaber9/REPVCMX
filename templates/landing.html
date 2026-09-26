@@ -28,6 +28,15 @@
   .inicio-hero .btn-participar:hover { background: #eef6f1; }
   .inicio-hero .ya-soy { display: block; margin-top: 14px; font-size: 0.9rem; color: white; opacity: 0.9; }
 
+  .kg-contador {
+    text-align: center; background: #f1f8f4; border: 2px solid var(--green); border-radius: 14px;
+    padding: 20px 16px; margin-bottom: 20px;
+  }
+  .kg-contador .kg-titulo { font-size: 0.95rem; color: var(--muted); margin: 0; }
+  .kg-contador .kg-cifra { font-size: 2.6rem; font-weight: 800; color: var(--green-dark); line-height: 1.15; margin: 4px 0; }
+  .kg-contador .kg-cifra small { font-size: 1.2rem; font-weight: 700; }
+  .kg-contador .kg-pie { font-size: 0.85rem; color: var(--muted); margin: 0; }
+
   .inicio-seccion h2 { font-size: 1.25rem; margin-bottom: 6px; }
   .inicio-seccion > p { color: var(--muted); line-height: 1.55; margin-top: 0; }
 
@@ -84,6 +93,12 @@
   <p class="dato">Un paciente puede producir hasta <strong>100 kg</strong> de este material al año.</p>
   <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
   <a class="ya-soy" href="{{ url_for('login', tipo='cliente') }}">Ya soy parte del programa — iniciar sesión</a>
+</section>
+
+<section class="kg-contador">
+  <p class="kg-titulo">Material reciclado hasta hoy</p>
+  <p class="kg-cifra"><span id="kg-valor">{{ "{:,.1f}".format(kg_reciclados) }}</span> <small>kg</small></p>
+  <p class="kg-pie">Se actualiza con cada recolección que registran nuestros recolectores.</p>
 </section>
 
 <section class="card inicio-seccion">
@@ -158,6 +173,16 @@
 </div>
 
 <script>
+async function actualizarKg() {
+  try {
+    const resp = await fetch('/kg-reciclados', {cache: 'no-store'});
+    if (!resp.ok) return;
+    const data = await resp.json();
+    document.getElementById('kg-valor').textContent = data.kg.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+  } catch (e) {}
+}
+setInterval(actualizarKg, 60000);
+
 const opcionesCp = document.getElementById('opciones-cp');
 const resultadoCp = document.getElementById('resultado-cp');
 
