@@ -286,7 +286,7 @@
           <br>
         {% endif %}
         {% if p['link_webinar'] %}<a class="btn small" href="{{ p['link_webinar'] }}" target="_blank" rel="noopener">Ingresar al webinar</a><br>{% endif %}
-        <span style="color:var(--muted); font-size:0.8rem;">{{ p['created_at'] }}</span>
+        <span style="color:var(--muted); font-size:0.8rem;">{{ p['created_at']|cdmx }}</span>
         {% if p['tipo'] == 'evento' %}
         <div style="margin-top:8px;">
           {% if p['id'] in nef_confirmados %}

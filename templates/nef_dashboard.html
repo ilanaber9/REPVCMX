@@ -38,7 +38,7 @@
       <li>
         <strong>{{ p['titulo'] }}</strong><br>
         {% if p['contenido'] %}{{ p['contenido'] }}<br>{% endif %}
-        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at'] }}</span>
+        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at']|cdmx }}</span>
         <div style="margin-top:8px;">
           <form method="post" action="{{ url_for('nef_eliminar_publicacion', publicacion_id=p['id']) }}"
                 onsubmit="return confirm('¿Eliminar esta publicación?');">
@@ -152,7 +152,7 @@
           <br>
         {% endif %}
         <strong>{{ p['confirmaciones'] }} confirmación(es) de asistencia.</strong><br>
-        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at'] }}</span>
+        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at']|cdmx }}</span>
         <div style="margin-top:8px;">
           <form method="post" action="{{ url_for('nef_eliminar_publicacion', publicacion_id=p['id']) }}"
                 onsubmit="return confirm('¿Eliminar esta publicación?');">
@@ -203,7 +203,7 @@
         {% if p['contenido'] %}{{ p['contenido'] }}<br>{% endif %}
         {% if p['fecha_evento'] %}Fecha: {{ p['fecha_evento'] }}{% if p['hora_evento'] %} a las {{ p['hora_evento'] }}{% endif %}<br>{% endif %}
         {% if p['link_webinar'] %}Liga: <a href="{{ p['link_webinar'] }}" target="_blank" rel="noopener">{{ p['link_webinar'] }}</a><br>{% endif %}
-        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at'] }}</span>
+        <span style="color:var(--muted); font-size:0.8rem;">Publicado: {{ p['created_at']|cdmx }}</span>
         <div style="margin-top:8px;">
           <form method="post" action="{{ url_for('nef_eliminar_publicacion', publicacion_id=p['id']) }}"
                 onsubmit="return confirm('¿Eliminar esta publicación?');">

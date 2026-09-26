@@ -126,6 +126,23 @@ def ahora_negocio():
     return datetime.now(ZONA_HORARIA_NEGOCIO)
 
 
+def utc_a_cdmx(valor):
+    """Convierte un created_at guardado por SQLite (UTC, 'YYYY-MM-DD HH:MM:SS') a hora de Ciudad de México."""
+    if not valor:
+        return valor
+    try:
+        dt = datetime.strptime(valor[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("UTC"))
+    except ValueError:
+        return valor
+    return dt.astimezone(ZONA_HORARIA_NEGOCIO).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def ahora_negocio_local():
+    """Hora de Ciudad de México sin zona horaria, en el mismo formato en que se guardan
+    hora_inicio_real/hora_fin_real y con el que se arman los horarios que ve el paciente."""
+    return ahora_negocio().replace(tzinfo=None)
+
+
 # Filiberto Gómez 279, Tlalnepantla de Baz, Estado de México — punto de partida/regreso.
 DEPOT_LAT = 19.5438982
 DEPOT_LON = -99.2055009
@@ -674,7 +691,7 @@ def horario_estimado_siguiente(db, parada_id):
     else:
         minutos = haversine_km(origen_lat, origen_lon, parada["lat"], parada["lon"]) / VELOCIDAD_PROMEDIO_KMH * 60
 
-    llegada = datetime.now() + timedelta(minutes=minutos)
+    llegada = ahora_negocio_local() + timedelta(minutes=minutos)
     salida_de_ahi = llegada + timedelta(minutes=30)
     return f"{llegada.strftime('%-I:%M %p')} – {salida_de_ahi.strftime('%-I:%M %p')}"
 
@@ -717,7 +734,7 @@ def horario_estimado_parada(db, parada_id):
             hora_h, hora_m = (int(x) for x in parada["hora_salida"].split(":"))
         except (ValueError, AttributeError):
             hora_h, hora_m = 8, 0
-        inicio = datetime.combine(date.today(), dtime(hora_h, hora_m))
+        inicio = datetime.combine(ahora_negocio().date(), dtime(hora_h, hora_m))
 
     indice = [p["id"] for p in con_coords].index(parada["id"])
     minutos_acumulados = sum(t * FACTOR_TRAFICO for t in tramos_min[: indice + 1]) + indice * MINUTOS_POR_PARADA
@@ -966,7 +983,7 @@ def crear_respaldo_bd():
     with open(ruta_temporal, "rb") as f:
         contenido_sin_comprimir = f.read()
     os.remove(ruta_temporal)
-    nombre_archivo = f"respaldo_repvc_{date.today().isoformat()}.db.gz"
+    nombre_archivo = f"respaldo_repvc_{ahora_negocio().date().isoformat()}.db.gz"
     return nombre_archivo, gzip.compress(contenido_sin_comprimir)
 
 
@@ -999,7 +1016,7 @@ def hacer_respaldo_y_enviar():
         destinatario = os.environ.get("BACKUP_EMAIL", "repvcmx@gmail.com")
         exitoso = enviar_email_con_adjunto(
             destinatario,
-            f"Respaldo de RE-PVC — {date.today().isoformat()}",
+            f"Respaldo de RE-PVC — {ahora_negocio().date().isoformat()}",
             "Respaldo automático diario de la base de datos de RE-PVC, adjunto y comprimido "
             "(.db.gz). Contiene información real de pacientes — trata este correo con el mismo "
             "cuidado que el resto del sistema.",
@@ -2991,7 +3008,7 @@ def admin_dashboard(user):
         "SELECT * FROM inventario_cajas ORDER BY created_at DESC LIMIT 100"
     ).fetchall()
 
-    fecha_productividad = request.args.get("fecha") or date.today().isoformat()
+    fecha_productividad = request.args.get("fecha") or ahora_negocio().date().isoformat()
     productividad_dia = db.execute(
         "SELECT * FROM productividad WHERE fecha = ? ORDER BY created_at DESC", (fecha_productividad,)
     ).fetchall()
@@ -3010,7 +3027,7 @@ def admin_dashboard(user):
     try:
         semana_ref = date.fromisoformat(semana_ref_str)
     except ValueError:
-        semana_ref = date.today()
+        semana_ref = ahora_negocio().date()
     lunes = semana_ref - timedelta(days=semana_ref.weekday())
     dias_semana = [lunes + timedelta(days=i) for i in range(5)]
     viernes = dias_semana[-1]
@@ -3754,7 +3771,7 @@ def admin_ajuste_cajas(user):
 def admin_nueva_productividad(user):
     persona = request.form.get("persona")
     actividad = request.form.get("actividad")
-    fecha = request.form.get("fecha") or date.today().isoformat()
+    fecha = request.form.get("fecha") or ahora_negocio().date().isoformat()
     cantidad_kg = request.form.get("cantidad_kg", "").strip()
     notas = request.form.get("notas", "").strip() or None
     if persona not in PERSONAS_PRODUCTIVIDAD:
@@ -4262,7 +4279,7 @@ def admin_rutas_masivas(user):
     ).fetchall()
     return render_template(
         "admin_rutas_masivas.html", zonas=zonas, recolectores=recolectores,
-        zona_preseleccionada=request.args.get("zona", ""), hoy=date.today().isoformat(),
+        zona_preseleccionada=request.args.get("zona", ""), hoy=ahora_negocio().date().isoformat(),
     )
 
 
@@ -4293,7 +4310,7 @@ def admin_ver_ruta(user, ruta_id):
             inicio_real = datetime.strptime(ruta["hora_inicio_real"], "%Y-%m-%d %H:%M:%S")
             fin_real = (
                 datetime.strptime(ruta["hora_fin_real"], "%Y-%m-%d %H:%M:%S")
-                if ruta["hora_fin_real"] else datetime.now()
+                if ruta["hora_fin_real"] else ahora_negocio_local()
             )
             tiempo_real = formatear_duracion((fin_real - inicio_real).total_seconds() / 60)
         except ValueError:
@@ -4903,7 +4920,7 @@ def admin_exportar_pacientes(user):
          "Zona/Ruta", "Modalidad", "Última visita", "Material recolectado (kg)", "Estado"],
         filas,
     )
-    return respuesta_excel(wb, f"pacientes_{date.today().isoformat()}.xlsx")
+    return respuesta_excel(wb, f"pacientes_{ahora_negocio().date().isoformat()}.xlsx")
 
 
 @app.route("/admin/reportes/inventarios.xlsx")
@@ -4944,7 +4961,7 @@ def admin_exportar_inventarios(user):
         wb, "Almacén producto terminado", ["Fecha", "Tipo", "Material", "Cantidad", "Motivo"], filas_almacen
     )
 
-    return respuesta_excel(wb, f"inventarios_{date.today().isoformat()}.xlsx")
+    return respuesta_excel(wb, f"inventarios_{ahora_negocio().date().isoformat()}.xlsx")
 
 
 @app.route("/admin/reportes/productividad.xlsx")
@@ -4960,7 +4977,7 @@ def admin_exportar_productividad(user):
     wb = Workbook()
     wb.remove(wb.active)
     agregar_hoja_excel(wb, "Productividad", ["Fecha", "Persona", "Actividad", "Kg", "Notas"], filas)
-    return respuesta_excel(wb, f"productividad_{date.today().isoformat()}.xlsx")
+    return respuesta_excel(wb, f"productividad_{ahora_negocio().date().isoformat()}.xlsx")
 
 
 @app.route("/admin/reportes/rutas-finalizadas.xlsx")
@@ -4997,7 +5014,7 @@ def admin_exportar_rutas_finalizadas(user):
         wb, "Rutas finalizadas",
         ["Nombre", "Fecha", "Recolector", "Paradas", "Tiempo real", "Kg recolectados"], filas,
     )
-    return respuesta_excel(wb, f"rutas_finalizadas_{date.today().isoformat()}.xlsx")
+    return respuesta_excel(wb, f"rutas_finalizadas_{ahora_negocio().date().isoformat()}.xlsx")
 
 
 @app.route("/admin/reportes/material-recolectado.xlsx")
@@ -5017,7 +5034,7 @@ def admin_exportar_material_recolectado(user):
     wb = Workbook()
     wb.remove(wb.active)
     agregar_hoja_excel(wb, "Material recolectado", ["Paciente", "WhatsApp", "Kg recolectados"], filas)
-    return respuesta_excel(wb, f"material_recolectado_{date.today().isoformat()}.xlsx")
+    return respuesta_excel(wb, f"material_recolectado_{ahora_negocio().date().isoformat()}.xlsx")
 
 
 @app.route("/admin/reportes/cajas-entregadas.xlsx")
@@ -5048,7 +5065,7 @@ def admin_exportar_cajas_entregadas(user):
         ["Paciente", "Material", "Cantidad", "Donar/Recibir", "Modalidad", "Estado", "Fecha de solicitud"],
         filas,
     )
-    return respuesta_excel(wb, f"cajas_entregadas_{date.today().isoformat()}.xlsx")
+    return respuesta_excel(wb, f"cajas_entregadas_{ahora_negocio().date().isoformat()}.xlsx")
 
 
 # ---------- Recolector ----------
@@ -5070,7 +5087,7 @@ def recolector_dashboard(user):
     ).fetchall()
     horas_extra_total = sum(r["horas_extra"] for r in horas_extra_registros)
     return render_template(
-        "recolector_dashboard.html", rutas=rutas, hoy=date.today().isoformat(),
+        "recolector_dashboard.html", rutas=rutas, hoy=ahora_negocio().date().isoformat(),
         horas_extra_registros=horas_extra_registros, horas_extra_total=horas_extra_total,
     )
 
@@ -5135,7 +5152,7 @@ def recolector_ver_ruta(user, ruta_id):
             inicio_real = datetime.strptime(ruta["hora_inicio_real"], "%Y-%m-%d %H:%M:%S")
             fin_real = (
                 datetime.strptime(ruta["hora_fin_real"], "%Y-%m-%d %H:%M:%S")
-                if ruta["hora_fin_real"] else datetime.now()
+                if ruta["hora_fin_real"] else ahora_negocio_local()
             )
             tiempo_real = formatear_duracion((fin_real - inicio_real).total_seconds() / 60)
         except ValueError:
@@ -5178,7 +5195,7 @@ def recolector_iniciar_ruta(user, ruta_id):
         flash("Esta ruta ya se había iniciado.", "error")
         return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
 
-    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
     nuevo_estado = "en_curso" if ruta["estado"] == "planificada" else ruta["estado"]
     db.execute(
         "UPDATE rutas SET hora_inicio_real = ?, estado = ? WHERE id = ?", (ahora, nuevo_estado, ruta_id)
@@ -5206,7 +5223,7 @@ def recolector_finalizar_ruta(user, ruta_id):
         flash("Esta ruta ya se había finalizado.", "error")
         return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
 
-    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
     db.execute("UPDATE rutas SET hora_fin_real = ? WHERE id = ?", (ahora, ruta_id))
     db.execute(
         "UPDATE solicitudes SET estado = 'pendiente' WHERE estado IN ('recolectada', 'incidencia') "
@@ -5267,7 +5284,7 @@ def recolector_suspender_ruta(user, ruta_id):
                 if u2 and u2["telefono"]:
                     afectados[u2["telefono"]] = u2["name"]
 
-    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
     db.execute("UPDATE rutas SET hora_fin_real = ?, estado = 'completada' WHERE id = ?", (ahora, ruta_id))
     crear_notificacion_admin(
         db, None,
@@ -5306,7 +5323,7 @@ def _resolver_resultado_parte(db, solicitud_id, tipo, tipo_redistribucion, mater
     es_entrega = tipo == "entrega"
     if resultado == "completada":
         if tipo_redistribucion is None:
-            fecha_reinicio = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            fecha_reinicio = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
             db.execute(
                 "UPDATE solicitudes SET estado = 'pendiente', fecha_reinicio_espera = ? WHERE id = ?",
                 (fecha_reinicio, solicitud_id),
@@ -5744,6 +5761,8 @@ def webhook_whatsapp():
     )
     return app.response_class(twiml, mimetype="text/xml")
 
+
+app.add_template_filter(utc_a_cdmx, "cdmx")
 
 init_db()
 threading.Thread(target=_hilo_avisos_programados, daemon=True).start()

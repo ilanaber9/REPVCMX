@@ -99,7 +99,7 @@
       correos con el mismo cuidado que el sistema.
     </p>
     {% if ultimo_respaldo %}
-    <p style="font-size:0.9rem;">Último respaldo automático enviado: <strong>{{ ultimo_respaldo['created_at'] }}</strong></p>
+    <p style="font-size:0.9rem;">Último respaldo automático enviado: <strong>{{ ultimo_respaldo['created_at']|cdmx }}</strong></p>
     {% else %}
     <p class="empty">Todavía no se ha mandado ningún respaldo automático (el primero sale dentro de la próxima hora).</p>
     {% endif %}
@@ -524,7 +524,7 @@
       {% for n in notificaciones %}
       <li style="{% if n['leida'] %}opacity:0.6;{% endif %}">
         {{ n['mensaje'] }}
-        <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">{{ n['created_at'] }}</div>
+        <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">{{ n['created_at']|cdmx }}</div>
         {% if not n['leida'] %}
         <form class="inline" method="post" action="{{ url_for('admin_marcar_notificacion_leida', notificacion_id=n['id']) }}" style="margin-top:8px;">
           <button type="submit" class="small secondary">Marcar como leída</button>
@@ -673,7 +673,7 @@
         <td>{{ s['cliente_nombre'] }}</td>
         <td>{{ s['direccion'] }}</td>
         <td>{{ s['telefono'] or '—' }}</td>
-        <td>{{ s['created_at'] }}</td>
+        <td>{{ s['created_at']|cdmx }}</td>
       </tr>
       {% endfor %}
     </table>
@@ -698,7 +698,7 @@
         <td>{{ s['cliente_nombre'] }}</td>
         <td>{{ s['direccion'] }}</td>
         <td>{{ s['telefono'] or '—' }}</td>
-        <td>{{ s['created_at'] }}</td>
+        <td>{{ s['created_at']|cdmx }}</td>
         <td>
           <form method="post" action="{{ url_for('admin_activar_pendiente_ruta', solicitud_id=s['id']) }}">
             <button type="submit" class="small">Activar</button>
@@ -737,7 +737,7 @@
       <tr><th>Fecha</th><th>Cantidad</th><th>Motivo</th></tr>
       {% for m in ingresos %}
       <tr>
-        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['created_at']|cdmx }}</td>
         <td>${{ "%.2f"|format(m['monto']) }}</td>
         <td>{{ m['motivo'] }}</td>
       </tr>
@@ -765,7 +765,7 @@
       <tr><th>Fecha</th><th>Cantidad</th><th>Motivo</th></tr>
       {% for m in egresos %}
       <tr>
-        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['created_at']|cdmx }}</td>
         <td>${{ "%.2f"|format(m['monto']) }}</td>
         <td>{{ m['motivo'] }}</td>
       </tr>
@@ -855,7 +855,7 @@
         <div style="padding:10px;">
           <strong style="font-size:0.9rem;">{{ v['titulo'] }}</strong>
           {% if v['descripcion'] %}<p style="font-size:0.82rem; color:var(--muted); margin:4px 0;">{{ v['descripcion'] }}</p>{% endif %}
-          <span style="color:var(--muted); font-size:0.78rem;">{{ v['created_at'] }}</span>
+          <span style="color:var(--muted); font-size:0.78rem;">{{ v['created_at']|cdmx }}</span>
           <form method="post" action="{{ url_for('admin_eliminar_video', video_id=v['id']) }}"
                 onsubmit="return confirm('¿Eliminar este video?');">
             <button type="submit" class="small danger">Eliminar</button>
@@ -920,7 +920,7 @@
       <tr><th>Fecha</th><th>Material</th><th>Cantidad</th><th>Notas</th></tr>
       {% for m in almacen_entradas %}
       <tr>
-        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['created_at']|cdmx }}</td>
         <td>{{ m['material'] }}</td>
         <td>{{ "%.1f"|format(m['cantidad']) }} kg</td>
         <td>{{ m['motivo'] or '' }}</td>
@@ -956,7 +956,7 @@
       <tr><th>Fecha</th><th>Material</th><th>Cantidad</th><th>Notas</th></tr>
       {% for m in almacen_salidas %}
       <tr>
-        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['created_at']|cdmx }}</td>
         <td>{{ m['material'] }}</td>
         <td>{{ "%.1f"|format(m['cantidad']) }} kg</td>
         <td>{{ m['motivo'] or '' }}</td>
@@ -1065,7 +1065,7 @@
       <tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Notas</th></tr>
       {% for m in movimientos_botes %}
       <tr>
-        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['created_at']|cdmx }}</td>
         <td>
           {% if m['tipo'] == 'compra' %}<span class="badge entregado">Compra</span>
           {% elif m['tipo'] == 'entrega' %}<span class="badge pendiente_entrega">Entrega</span>
@@ -1125,7 +1125,7 @@
       <tr><th>Fecha</th><th>Tipo de caja</th><th>Movimiento</th><th>Cantidad</th><th>Notas</th></tr>
       {% for m in movimientos_cajas %}
       <tr>
-        <td>{{ m['created_at'] }}</td>
+        <td>{{ m['created_at']|cdmx }}</td>
         <td>{{ m['material'] }}</td>
         <td>
           {% if m['tipo'] == 'donacion' %}<span class="badge entregado">Donación</span>
@@ -1227,7 +1227,7 @@
       <tr><th>Hora</th><th>Persona</th><th>Actividad</th><th>Kg</th><th>Notas</th><th></th></tr>
       {% for r in productividad_dia %}
       <tr>
-        <td>{{ r['created_at'][11:16] }}</td>
+        <td>{{ (r['created_at']|cdmx)[11:16] }}</td>
         <td>{{ r['persona'] }}</td>
         <td>{{ actividades_productividad_labels[r['actividad']] }}</td>
         <td>{{ "%.1f"|format(r['cantidad_kg']) if r['cantidad_kg'] is not none else '—' }}</td>
