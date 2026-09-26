@@ -7,7 +7,6 @@
   <button type="button" class="tab-btn" data-tab="material">Material recolectado</button>
   <button type="button" class="tab-btn" data-tab="cajas">Mis cajas</button>
   <button type="button" class="tab-btn" data-tab="redistribucion">Redistribución de cajas</button>
-  <button type="button" class="tab-btn" data-tab="videos">Videos</button>
   {% if MOSTRAR_NEF and current_user['recibir_info_nef'] %}
   <button type="button" class="tab-btn" data-tab="nef" id="tab-btn-nef">NEF{% if nef_nuevas %} ({{ nef_nuevas }}){% endif %}</button>
   {% endif %}
@@ -216,29 +215,6 @@
         </a>
       </p>
     </div>
-  </div>
-</div>
-
-<div class="tab-panel" data-tab="videos">
-  <div class="card">
-    <h1 style="margin:0;">Videos</h1>
-    {% if admin_videos %}
-    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:14px; margin-top:14px;">
-      {% for v in admin_videos %}
-      <div style="border:1px solid var(--border); border-radius:10px; overflow:hidden;">
-        <video controls preload="metadata" style="width:100%; display:block; background:#000; aspect-ratio:9/16;">
-          <source src="{{ url_for('static', filename='videos/admin/' + v['archivo']) }}">
-        </video>
-        <div style="padding:8px;">
-          <strong style="font-size:0.85rem;">{{ v['titulo'] }}</strong>
-          {% if v['descripcion'] %}<p style="font-size:0.78rem; color:var(--muted); margin:4px 0 0;">{{ v['descripcion'] }}</p>{% endif %}
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="empty">Aún no hay videos.</p>
-    {% endif %}
   </div>
 </div>
 

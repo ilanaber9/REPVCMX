@@ -65,7 +65,6 @@
   <button type="button" class="tab-btn" data-tab="notificaciones">Notificaciones{% if notificaciones_sin_leer %} ({{ notificaciones_sin_leer }}){% endif %}</button>
   <button type="button" class="tab-btn" data-tab="dinero">Dinero</button>
   <button type="button" class="tab-btn" data-tab="kg">Kg recolectados</button>
-  <button type="button" class="tab-btn" data-tab="videos">Videos</button>
   <button type="button" class="tab-btn" data-tab="inventarios">Inventarios</button>
   <button type="button" class="tab-btn" data-tab="productividad">Productividad del día</button>
   {% if current_user['es_admin_general'] %}
@@ -826,52 +825,6 @@
     <p style="font-size:2.5rem; font-weight:700; margin:14px 0 0;">{{ "%.1f"|format(total_kg_recolectados) }} kg</p>
     <p style="color:var(--muted); font-size:0.9rem; margin-top:10px;">Suma de todos los kg recolectados registrados por los recolectores en todas las rutas.</p>
   </div>
-  </div>
-</div>
-
-<div class="tab-panel" data-tab="videos">
-  <div class="card">
-    <h1 style="margin:0;">Subir video</h1>
-    <p style="color:var(--muted); font-size:0.9rem;">Estos videos los ven todos los pacientes en su pestaña "Videos"{% if MOSTRAR_NEF %} — no se relacionan con el contenido de NEF{% endif %}.</p>
-    <form method="post" action="{{ url_for('admin_nuevo_video') }}" enctype="multipart/form-data">
-      <label>Título</label>
-      <input type="text" name="titulo" required>
-      <label>Descripción (opcional)</label>
-      <textarea name="descripcion" rows="3"></textarea>
-      <label>Archivo de video</label>
-      <div class="video-dropzone" id="dropzone-admin">
-        <div id="dropzone-admin-texto"><strong>Arrastra tu video aquí</strong><br>o haz clic para seleccionarlo</div>
-        <div class="video-dropzone-archivo" id="dropzone-admin-archivo"></div>
-      </div>
-      <input type="file" name="archivo" id="input-video-admin" style="display:none;"
-             accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm,.m4v" required>
-      <button type="submit">Subir</button>
-    </form>
-  </div>
-  <div class="card">
-    <h2 style="margin-top:0;">Videos subidos</h2>
-    {% if admin_videos %}
-    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px; margin-top:14px;">
-      {% for v in admin_videos %}
-      <div style="border:1px solid var(--border); border-radius:10px; overflow:hidden;">
-        <video controls preload="metadata" style="width:100%; display:block; background:#000; aspect-ratio:9/16;">
-          <source src="{{ url_for('static', filename='videos/admin/' + v['archivo']) }}">
-        </video>
-        <div style="padding:10px;">
-          <strong style="font-size:0.9rem;">{{ v['titulo'] }}</strong>
-          {% if v['descripcion'] %}<p style="font-size:0.82rem; color:var(--muted); margin:4px 0;">{{ v['descripcion'] }}</p>{% endif %}
-          <span style="color:var(--muted); font-size:0.78rem;">{{ v['created_at']|cdmx }}</span>
-          <form method="post" action="{{ url_for('admin_eliminar_video', video_id=v['id']) }}"
-                onsubmit="return confirm('¿Eliminar este video?');">
-            <button type="submit" class="small danger">Eliminar</button>
-          </form>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="empty">Aún no hay videos.</p>
-    {% endif %}
   </div>
 </div>
 
