@@ -165,6 +165,11 @@ CREATE TABLE pagos_quincenales (
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 
+CREATE TABLE configuracion_general (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  kg_iniciales REAL NOT NULL DEFAULT 0
+);
+
 CREATE TABLE configuracion_pago (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   monto_dia_vacaciones REAL NOT NULL DEFAULT 0

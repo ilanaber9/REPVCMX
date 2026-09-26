@@ -4,9 +4,11 @@
    aquí la fuente de las cifras en impacto_fuente cuando RE-PVC la tenga. #}
 {% set impacto = [
   {"icono": "⚡", "titulo": "Energía", "factor": 21, "unidad": "kWh", "detalle": "de energía ahorrada",
-   "divisor": 9.633, "equiv_antes": "≈", "equiv_despues": "días de electricidad de una casa promedio en México"},
+   "divisor": 9.633, "equiv_antes": "≈", "equiv_despues": "días de electricidad de una casa promedio en México",
+   "en_anios": "años de electricidad de una casa promedio en México"},
   {"icono": "💧", "titulo": "Agua", "factor": 13, "unidad": "L", "detalle": "de agua ahorrada",
-   "divisor": 360, "equiv_antes": "≈", "equiv_despues": "días de consumo de agua de una persona"},
+   "divisor": 360, "equiv_antes": "≈", "equiv_despues": "días de consumo de agua de una persona",
+   "en_anios": "años de consumo de agua de una persona"},
   {"icono": "🌎", "titulo": "Emisiones de CO₂", "factor": 5, "unidad": "kg", "detalle": "de emisiones de CO₂ evitadas",
    "divisor": 21, "equiv_antes": "lo que absorben ≈", "equiv_despues": "árboles adultos en un año"},
 ] %}
@@ -155,7 +157,9 @@
       <span class="cifra"><span class="valor-impacto" data-factor="{{ dato.factor }}">{{ "{:,.0f}".format(kg_reciclados * dato.factor) }}</span> <span class="unidad">{{ dato.unidad }}</span></span>
       <span class="titulo">{{ dato.titulo }}</span>
       <span class="detalle">{{ dato.detalle }}</span>
-      <span class="equivalencia">Equivale a {{ dato.equiv_antes }} <strong><span class="valor-equiv" data-divisor="{{ dato.divisor }}" data-factor="{{ dato.factor }}">{{ equiv(kg_reciclados * dato.factor / dato.divisor) }}</span></strong> {{ dato.equiv_despues }}</span>
+      {% set n_equiv = kg_reciclados * dato.factor / dato.divisor %}
+      {% set en_anios = dato.en_anios and n_equiv >= 730 %}
+      <span class="equivalencia">Equivale a {{ dato.equiv_antes }} <strong><span class="valor-equiv" data-divisor="{{ dato.divisor }}" data-factor="{{ dato.factor }}"{% if dato.en_anios %} data-anios="{{ dato.en_anios }}" data-dias="{{ dato.equiv_despues }}"{% endif %}>{{ equiv(n_equiv / 365 if en_anios else n_equiv) }}</span></strong> <span class="equiv-sufijo">{{ dato.en_anios if en_anios else dato.equiv_despues }}</span></span>
     </div>
     {% endfor %}
   </div>
@@ -223,6 +227,11 @@ async function actualizarKg() {
     document.getElementById('kg-impacto').textContent = data.kg.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1});
     document.querySelectorAll('.valor-equiv').forEach(function (el) {
       var n = data.kg * Number(el.dataset.factor) / Number(el.dataset.divisor);
+      var sufijo = el.closest('.equivalencia').querySelector('.equiv-sufijo');
+      if (el.dataset.anios) {
+        if (n >= 730) { n = n / 365; sufijo.textContent = el.dataset.anios; }
+        else { sufijo.textContent = el.dataset.dias; }
+      }
       el.textContent = n.toLocaleString('en-US', {maximumFractionDigits: n < 10 ? 1 : 0, minimumFractionDigits: n < 10 ? 1 : 0});
     });
     document.querySelectorAll('.valor-impacto').forEach(function (el) {

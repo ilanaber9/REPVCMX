@@ -841,8 +841,20 @@
   <div class="subtab-panel" data-subtab="acumulado">
   <div class="card">
     <h1 style="margin:0;">Total acumulado</h1>
-    <p style="font-size:2.5rem; font-weight:700; margin:14px 0 0;">{{ "%.1f"|format(total_kg_recolectados) }} kg</p>
-    <p style="color:var(--muted); font-size:0.9rem; margin-top:10px;">Suma de todos los kg recolectados registrados por los recolectores en todas las rutas.</p>
+    <p style="font-size:2.5rem; font-weight:700; margin:14px 0 0;">{{ "{:,.1f}".format(total_kg_recolectados) }} kg</p>
+    <p style="color:var(--muted); font-size:0.9rem; margin-top:10px;">
+      Suma de {{ "{:,.1f}".format(kg_base) }} kg acumulados antes de usar la app más {{ "{:,.1f}".format(kg_en_app) }} kg
+      registrados por los recolectores en todas las rutas. Este es el total que se muestra en la página de inicio.
+    </p>
+    {% if current_user['es_admin_general'] %}
+    <form method="post" action="{{ url_for('admin_actualizar_kg_iniciales') }}" style="margin-top:14px; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+      <div>
+        <label style="margin-top:0;">Kg acumulados antes de usar la app</label>
+        <input type="number" name="kg_iniciales" min="0" step="0.1" value="{{ kg_base }}" required style="width:200px;">
+      </div>
+      <button type="submit" class="small secondary" style="margin-top:0;">Guardar</button>
+    </form>
+    {% endif %}
   </div>
   </div>
 </div>

@@ -1871,6 +1871,17 @@ def aplicar_migraciones_pendientes():
         )
         db.execute("INSERT INTO configuracion_pago (id, monto_dia_vacaciones) VALUES (1, 0)")
 
+    if "configuracion_general" not in tablas:
+        db.execute(
+            "CREATE TABLE configuracion_general ("
+            "  id INTEGER PRIMARY KEY CHECK (id = 1),"
+            "  kg_iniciales REAL NOT NULL DEFAULT 0"
+            ")"
+        )
+    # 60,000 kg: lo que se había reciclado antes de empezar a registrarlo en la app.
+    if db.execute("SELECT COUNT(*) FROM configuracion_general").fetchone()[0] == 0:
+        db.execute("INSERT INTO configuracion_general (id, kg_iniciales) VALUES (1, 60000)")
+
     if "intentos_login" not in tablas:
         db.execute(
             "CREATE TABLE intentos_login ("
@@ -1980,10 +1991,20 @@ def home():
     return redirect(url_for("cliente_dashboard"))
 
 
-def total_kg_reciclados(db):
-    """El mismo total que muestra el panel de administración en 'Total acumulado': la suma de
-    todos los kg que los recolectores han registrado en las paradas."""
+def kg_iniciales(db):
+    fila = db.execute("SELECT kg_iniciales FROM configuracion_general WHERE id = 1").fetchone()
+    return fila["kg_iniciales"] if fila else 0
+
+
+def kg_registrados_en_app(db):
     return db.execute("SELECT COALESCE(SUM(kg_recolectados), 0) AS kg FROM paradas").fetchone()["kg"]
+
+
+def total_kg_reciclados(db):
+    """El mismo total que muestra el panel de administración en 'Total acumulado': los kg que
+    ya se habían reciclado antes de usar la app (kg_iniciales) más todos los que los recolectores
+    han registrado en las paradas."""
+    return kg_iniciales(db) + kg_registrados_en_app(db)
 
 
 @app.route("/kg-reciclados")
@@ -3082,9 +3103,9 @@ def admin_dashboard(user):
         "WHERE p.kg_recolectados IS NOT NULL "
         "GROUP BY r.fecha ORDER BY r.fecha DESC"
     ).fetchall()
-    total_kg_recolectados = db.execute(
-        "SELECT COALESCE(SUM(kg_recolectados), 0) AS kg FROM paradas"
-    ).fetchone()["kg"]
+    total_kg_recolectados = total_kg_reciclados(db)
+    kg_base = kg_iniciales(db)
+    kg_en_app = kg_registrados_en_app(db)
 
     almacen_entradas = db.execute(
         "SELECT * FROM almacen_movimientos WHERE tipo = 'entrada' ORDER BY created_at DESC"
@@ -3312,7 +3333,7 @@ def admin_dashboard(user):
         total_egresos=total_egresos,
         total_efectivo=total_ingresos - total_egresos,
         kg_por_dia=kg_por_dia,
-        total_kg_recolectados=total_kg_recolectados,
+        total_kg_recolectados=total_kg_recolectados, kg_base=kg_base, kg_en_app=kg_en_app,
         almacen_entradas=almacen_entradas,
         almacen_salidas=almacen_salidas,
         existencia_almacen=existencia_almacen,
@@ -4168,6 +4189,27 @@ def admin_actualizar_monto_vacaciones(user):
     db.commit()
     flash(f"Pago por día de vacaciones actualizado a ${monto:,.2f}.", "success")
     return redirect(url_for("admin_dashboard", tab="colaboradores"))
+
+
+@app.route("/admin/kg-iniciales", methods=["POST"])
+@login_required("admin")
+def admin_actualizar_kg_iniciales(user):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede editar los kg iniciales.", "error")
+        return redirect(url_for("admin_dashboard", tab="kg"))
+    try:
+        valor = float(request.form.get("kg_iniciales", "").strip().replace(",", ""))
+    except ValueError:
+        flash("Pon una cantidad válida de kg.", "error")
+        return redirect(url_for("admin_dashboard", tab="kg"))
+    if valor < 0:
+        flash("La cantidad no puede ser negativa.", "error")
+        return redirect(url_for("admin_dashboard", tab="kg"))
+    db = get_db()
+    db.execute("INSERT OR REPLACE INTO configuracion_general (id, kg_iniciales) VALUES (1, ?)", (valor,))
+    db.commit()
+    flash(f"Kg acumulados antes de usar la app actualizados a {valor:,.1f}.", "success")
+    return redirect(url_for("admin_dashboard", tab="kg"))
 
 
 @app.route("/admin/pago-quincenal/nuevo", methods=["POST"])
