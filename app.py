@@ -3487,6 +3487,14 @@ def _revertir_efectos_parada(db, p):
             "WHERE id = ? AND estado = 'pendiente'",
             (p["solicitud_id"],),
         )
+    elif p["estado"] == "completada":
+        # Una recolección completada dejó al paciente esperando 30/60 días para la siguiente;
+        # al deshacerla vuelve a quedar listo para programarse.
+        db.execute(
+            "UPDATE solicitudes SET fecha_reinicio_espera = NULL "
+            "WHERE id = ? AND estado = 'pendiente' AND tipo_redistribucion IS NULL",
+            (p["solicitud_id"],),
+        )
     if p["solicitud_extra_id"] and p["estado_extra"] == "completada" and p["tipo_extra"] == "entrega":
         db.execute(
             "UPDATE solicitudes SET estado = 'pendiente_entrega', fecha_reinicio_espera = NULL "
@@ -3660,6 +3668,29 @@ def admin_marcar_bote_devolver(user, solicitud_id):
     db.commit()
     nombre = sol["nombre_contacto"] or sol["direccion"]
     flash(f"Se marcó que '{nombre}' debe regresar el bote — aparecerá en su próxima ruta.", "success")
+    return redirect(url_for("admin_dashboard", tab="pacientes"))
+
+
+@app.route("/admin/solicitudes/<int:solicitud_id>/listo-recoleccion", methods=["POST"])
+@login_required("admin")
+def admin_marcar_listo_recoleccion(user, solicitud_id):
+    """Quita la espera de 30/60 días de un paciente para que vuelva a aparecer en la lista de
+    pacientes por programar (por ejemplo, tras una recolección de prueba o registrada por error)."""
+    db = get_db()
+    sol = db.execute("SELECT * FROM solicitudes WHERE id = ?", (solicitud_id,)).fetchone()
+    if sol is None:
+        flash("Esa solicitud ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="pacientes"))
+    nombre = sol["nombre_contacto"] or sol["direccion"]
+    if sol["cliente_id"]:
+        u = db.execute("SELECT name FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
+        nombre = u["name"] if u else nombre
+    if sol["estado"] not in ("pendiente", "pendiente_entrega"):
+        flash(f"'{nombre}' está en otro estado ({sol['estado']}) y no se puede marcar como listo ahora.", "error")
+        return redirect(url_for("admin_dashboard", tab="pacientes"))
+    db.execute("UPDATE solicitudes SET fecha_reinicio_espera = NULL WHERE id = ?", (solicitud_id,))
+    db.commit()
+    flash(f"'{nombre}' quedó listo para programarse en una ruta.", "success")
     return redirect(url_for("admin_dashboard", tab="pacientes"))
 
 

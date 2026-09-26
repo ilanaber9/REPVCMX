@@ -634,6 +634,11 @@
             {% elif p['bote_a_devolver'] %}
             <span class="badge incidencia">Por regresar</span>
             {% else %}
+            <form method="post" action="{{ url_for('admin_marcar_listo_recoleccion', solicitud_id=p['solicitud_id_actual']) }}"
+                  onsubmit="return confirm('¿Dejar a \'{{ p['name'] }}\' listo para programarse ya en una ruta, sin esperar sus 30/60 días?');"
+                  style="margin-bottom:4px;">
+              <button type="submit" class="small secondary">Listo para ruta</button>
+            </form>
             <form method="post" action="{{ url_for('admin_marcar_bote_devolver', solicitud_id=p['solicitud_id_actual']) }}"
                   onsubmit="return confirm('¿Marcar que \'{{ p['name'] }}\' debe regresar el bote? Aparecerá en su próxima ruta.');">
               <button type="submit" class="small secondary">Regresar bote</button>
