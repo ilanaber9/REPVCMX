@@ -6185,7 +6185,7 @@ def webhook_whatsapp():
     boton = (request.form.get("ButtonPayload") or request.form.get("ButtonText") or "").strip().lower()
     print(f"[webhook_whatsapp] Mensaje de {remitente}: {cuerpo!r} boton={boton!r}")
 
-    respuesta_texto = "Gracias por tu mensaje. Por ahora este número no atiende respuestas — para dudas, contáctanos directamente."
+    respuesta_texto = "Gracias por tu mensaje. Por ahora este número no atiende respuestas — para dudas, escríbenos al 55 5409 9854."
     respuesta_boton = {"confirmar_si": "si", "sí": "si", "si": "si", "confirmar_no": "no", "no": "no"}.get(boton)
     if respuesta_boton:
         respuesta_texto = _procesar_respuesta_boton_parada(remitente, respuesta_boton) or respuesta_texto
