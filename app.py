@@ -1931,7 +1931,10 @@ def inject_user():
 def home():
     user = current_user()
     if user is None:
-        return render_template("landing.html", kg_reciclados=total_kg_reciclados(get_db()))
+        db = get_db()
+        return render_template(
+            "landing.html", kg_reciclados=total_kg_reciclados(db), pacientes_participantes=contar_pacientes_activos(db)
+        )
     if user["role"] == "admin":
         return redirect(url_for("admin_dashboard"))
     if user["role"] == "recolector":
@@ -1958,7 +1961,8 @@ def total_kg_reciclados(db):
 
 @app.route("/kg-reciclados")
 def kg_reciclados_publico():
-    return jsonify({"kg": round(total_kg_reciclados(get_db()), 1)})
+    db = get_db()
+    return jsonify({"kg": round(total_kg_reciclados(db), 1), "pacientes": contar_pacientes_activos(db)})
 
 
 TIPO_LOGIN_ROLES = {"admin": "admin", "recolector": "recolector", "cliente": "cliente", "nef": "nef"}
