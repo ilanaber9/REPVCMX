@@ -4,16 +4,13 @@
    aquí la fuente de las cifras en impacto_fuente cuando RE-PVC la tenga. #}
 {% set impacto = [
   {"icono": "⚡", "titulo": "Energía", "factor": 21, "unidad": "kWh", "detalle": "de energía ahorrada",
-   "divisor": 9.633, "equiv_antes": "≈", "equiv_despues": "días de electricidad de una casa promedio en México",
-   "en_anios": "años de electricidad de una casa promedio en México"},
+   "divisor": 3468, "equiv_antes": "Equivale a la electricidad que consumen ≈", "equiv_despues": "casas en México durante 1 año"},
   {"icono": "💧", "titulo": "Agua", "factor": 13, "unidad": "L", "detalle": "de agua ahorrada",
-   "divisor": 360, "equiv_antes": "≈", "equiv_despues": "días de consumo de agua de una persona",
-   "en_anios": "años de consumo de agua de una persona"},
+   "divisor": 131400, "equiv_antes": "Equivale al agua que usan ≈", "equiv_despues": "personas durante 1 año"},
   {"icono": "🌎", "titulo": "Emisiones de CO₂", "factor": 5, "unidad": "kg", "detalle": "de emisiones de CO₂ evitadas",
-   "divisor": 21, "equiv_antes": "lo que absorben ≈", "equiv_despues": "árboles adultos en un año"},
+   "divisor": 21, "equiv_antes": "Equivale a lo que absorben ≈", "equiv_despues": "árboles adultos en un año"},
 ] %}
-{# divisor: cuánto equivale a "1" de la comparación (289 kWh/mes ÷ 30 días por casa; 360 L/día por persona;
-   21 kg de CO₂/año por árbol). #}
+{# divisor: cuánto equivale a "1" de la comparación: 289 kWh/mes × 12 = 3,468 kWh al año por casa; 360 L/día × 365 = 131,400 L al año por persona; 21 kg de CO₂/año por árbol. #}
 {% set impacto_fuente = "" %}
 {% macro equiv(n) -%}{% if n < 10 %}{{ "{:,.1f}".format(n) }}{% else %}{{ "{:,.0f}".format(n) }}{% endif %}{%- endmacro %}
 {% block title %}RE-PVC — Del cuidado de la gente al cuidado del ambiente{% endblock %}
@@ -157,14 +154,12 @@
       <span class="cifra"><span class="valor-impacto" data-factor="{{ dato.factor }}">{{ "{:,.0f}".format(kg_reciclados * dato.factor) }}</span> <span class="unidad">{{ dato.unidad }}</span></span>
       <span class="titulo">{{ dato.titulo }}</span>
       <span class="detalle">{{ dato.detalle }}</span>
-      {% set n_equiv = kg_reciclados * dato.factor / dato.divisor %}
-      {% set en_anios = dato.en_anios and n_equiv >= 730 %}
-      <span class="equivalencia">Equivale a {{ dato.equiv_antes }} <strong><span class="valor-equiv" data-divisor="{{ dato.divisor }}" data-factor="{{ dato.factor }}"{% if dato.en_anios %} data-anios="{{ dato.en_anios }}" data-dias="{{ dato.equiv_despues }}"{% endif %}>{{ equiv(n_equiv / 365 if en_anios else n_equiv) }}</span></strong> <span class="equiv-sufijo">{{ dato.en_anios if en_anios else dato.equiv_despues }}</span></span>
+      <span class="equivalencia">{{ dato.equiv_antes }} <strong><span class="valor-equiv" data-divisor="{{ dato.divisor }}" data-factor="{{ dato.factor }}">{{ equiv(kg_reciclados * dato.factor / dato.divisor) }}</span></strong> {{ dato.equiv_despues }}</span>
     </div>
     {% endfor %}
   </div>
   {% if impacto_fuente %}<p class="inicio-fuente">Fuente: {{ impacto_fuente }}</p>{% endif %}
-  <p class="inicio-fuente">Equivalencias calculadas con promedios de referencia: una casa en México consume ≈ 289 kWh al mes (CFE); una persona usa ≈ 360 L de agua al día (CONAGUA); un árbol adulto absorbe ≈ 21 kg de CO₂ al año.</p>
+  <p class="inicio-fuente">Equivalencias calculadas con promedios de referencia: una casa en México consume ≈ 289 kWh al mes, unos 3,468 al año (CFE); una persona usa ≈ 360 L de agua al día, unos 131,400 al año (CONAGUA); un árbol adulto absorbe ≈ 21 kg de CO₂ al año.</p>
 </section>
 
 <section class="card inicio-seccion" id="tutorial" style="text-align:center;">
@@ -227,11 +222,6 @@ async function actualizarKg() {
     document.getElementById('kg-impacto').textContent = data.kg.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1});
     document.querySelectorAll('.valor-equiv').forEach(function (el) {
       var n = data.kg * Number(el.dataset.factor) / Number(el.dataset.divisor);
-      var sufijo = el.closest('.equivalencia').querySelector('.equiv-sufijo');
-      if (el.dataset.anios) {
-        if (n >= 730) { n = n / 365; sufijo.textContent = el.dataset.anios; }
-        else { sufijo.textContent = el.dataset.dias; }
-      }
       el.textContent = n.toLocaleString('en-US', {maximumFractionDigits: n < 10 ? 1 : 0, minimumFractionDigits: n < 10 ? 1 : 0});
     });
     document.querySelectorAll('.valor-impacto').forEach(function (el) {
