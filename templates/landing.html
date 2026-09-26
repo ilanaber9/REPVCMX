@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {# Datos de impacto ambiental: cuánto se ahorra por cada kg de PVC reciclado frente a fabricar
-   material nuevo. Mientras "valor" esté vacío, la tarjeta muestra una raya. Llenar aquí cuando
-   RE-PVC tenga las cifras (y su fuente). #}
+   material nuevo ("factor"). En la página se multiplican por el total de kg reciclados. Agregar
+   aquí la fuente de las cifras en impacto_fuente cuando RE-PVC la tenga. #}
 {% set impacto = [
-  {"icono": "⚡", "titulo": "Energía", "valor": "21", "unidad": "kWh", "detalle": "de energía ahorrada"},
-  {"icono": "💧", "titulo": "Agua", "valor": "13", "unidad": "L", "detalle": "de agua ahorrada"},
-  {"icono": "🌎", "titulo": "CO₂", "valor": "5", "unidad": "kg", "detalle": "de CO₂ que se deja de emitir"},
+  {"icono": "⚡", "titulo": "Energía", "factor": 21, "unidad": "kWh", "detalle": "de energía ahorrada"},
+  {"icono": "💧", "titulo": "Agua", "factor": 13, "unidad": "L", "detalle": "de agua ahorrada"},
+  {"icono": "🌎", "titulo": "Emisiones de CO₂", "factor": 5, "unidad": "kg", "detalle": "de emisiones de CO₂ evitadas"},
 ] %}
 {% set impacto_fuente = "" %}
 {% block title %}RE-PVC — Del cuidado de la gente al cuidado del ambiente{% endblock %}
@@ -111,12 +111,12 @@
 
 <section class="card inicio-seccion">
   <h2>Nuestro impacto en el medio ambiente</h2>
-  <p>Por cada kilo de PVC que reciclamos, en comparación con fabricar material nuevo, ahorramos:</p>
+  <p>Con los <strong><span id="kg-impacto">{{ "{:,.1f}".format(kg_reciclados) }}</span> kg</strong> de PVC que hemos reciclado hasta hoy, en comparación con fabricar material nuevo, ahorramos:</p>
   <div class="inicio-impacto">
     {% for dato in impacto %}
     <div>
       <span class="icono">{{ dato.icono }}</span>
-      <span class="cifra">{{ dato.valor or "—" }}{% if dato.valor and dato.unidad %} <span class="unidad">{{ dato.unidad }}</span>{% endif %}</span>
+      <span class="cifra"><span class="valor-impacto" data-factor="{{ dato.factor }}">{{ "{:,.0f}".format(kg_reciclados * dato.factor) }}</span> <span class="unidad">{{ dato.unidad }}</span></span>
       <span class="titulo">{{ dato.titulo }}</span>
       <span class="detalle">{{ dato.detalle }}</span>
     </div>
@@ -172,6 +172,10 @@ async function actualizarKg() {
     if (!resp.ok) return;
     const data = await resp.json();
     document.getElementById('kg-valor').textContent = data.kg.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    document.getElementById('kg-impacto').textContent = data.kg.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    document.querySelectorAll('.valor-impacto').forEach(function (el) {
+      el.textContent = (data.kg * Number(el.dataset.factor)).toLocaleString('en-US', {maximumFractionDigits: 0});
+    });
   } catch (e) {}
 }
 setInterval(actualizarKg, 60000);
