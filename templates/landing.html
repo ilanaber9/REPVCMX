@@ -3,9 +3,9 @@
    material nuevo. Mientras "valor" esté vacío, la tarjeta muestra una raya. Llenar aquí cuando
    RE-PVC tenga las cifras (y su fuente). #}
 {% set impacto = [
-  {"icono": "⚡", "titulo": "Energía", "valor": "", "unidad": "", "detalle": "de energía ahorrada"},
-  {"icono": "💧", "titulo": "Agua", "valor": "", "unidad": "", "detalle": "de agua ahorrada"},
-  {"icono": "🌎", "titulo": "CO₂", "valor": "", "unidad": "", "detalle": "de CO₂ que se deja de emitir"},
+  {"icono": "⚡", "titulo": "Energía", "valor": "21", "unidad": "kWh", "detalle": "de energía ahorrada"},
+  {"icono": "💧", "titulo": "Agua", "valor": "13", "unidad": "L", "detalle": "de agua ahorrada"},
+  {"icono": "🌎", "titulo": "CO₂", "valor": "5", "unidad": "kg", "detalle": "de CO₂ que se deja de emitir"},
 ] %}
 {% set impacto_fuente = "" %}
 {% block title %}RE-PVC — Del cuidado de la gente al cuidado del ambiente{% endblock %}
@@ -16,6 +16,9 @@
     color: white; border-radius: 14px; padding: 36px 24px; text-align: center; margin-bottom: 20px;
   }
   .inicio-hero .lema { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; opacity: 0.85; margin: 0 0 10px; }
+  .inicio-hero h1.pregunta { font-size: 2.4rem; line-height: 1.15; margin: 8px auto 16px; max-width: 700px; }
+  .inicio-hero .dato { font-size: 1.3rem; }
+  .inicio-hero .dato strong { font-size: 1.6rem; }
   .inicio-hero h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 12px; }
   .inicio-hero p { font-size: 1.02rem; line-height: 1.5; margin: 0 auto; max-width: 560px; opacity: 0.95; }
   .inicio-hero .btn-participar {
@@ -65,6 +68,7 @@
   @media (max-width: 640px) {
     .inicio-hero { padding: 28px 18px; }
     .inicio-hero h1 { font-size: 1.55rem; }
+    .inicio-hero h1.pregunta { font-size: 1.85rem; }
     .inicio-impacto { grid-template-columns: 1fr; }
     .inicio-impacto > div { display: grid; grid-template-columns: 44px 1fr; text-align: left; align-items: center; column-gap: 10px; }
     .inicio-impacto .icono { grid-row: span 3; text-align: center; }
@@ -76,11 +80,8 @@
 {% block content %}
 <section class="inicio-hero">
   <p class="lema">Del cuidado de la gente al cuidado del ambiente</p>
-  <h1>Recolectamos en tu casa el material de PVC de tus tratamientos</h1>
-  <p>
-    En RE-PVC pasamos por tu domicilio a recoger el material de PVC que ya usaste, para que no
-    termine en la basura y pueda reciclarse. El servicio es gratuito y además te pagamos por él.
-  </p>
+  <h1 class="pregunta">¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden reciclar?</h1>
+  <p class="dato">Un paciente puede producir hasta <strong>100 kg</strong> de este material al año.</p>
   <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
   <a class="ya-soy" href="{{ url_for('login', tipo='cliente') }}">Ya soy parte del programa — iniciar sesión</a>
 </section>
@@ -89,17 +90,19 @@
   <h2>¿Qué hacemos?</h2>
   <p>
     RE-PVC es un programa de recolección a domicilio para pacientes. Organizamos rutas por zonas,
-    pasamos por el material que juntas en casa y lo llevamos a reciclar. Así el material
-    deja de ocupar espacio en tu casa y se aprovecha en vez de contaminar.
+    pasamos por el material que juntas en casa y lo acondicionamos para que sea utilizado en la
+    fabricación de otros productos, como recubrimiento de cables, suelas de zapato, mangueras,
+    perfiles, entre otros.
+  </p>
+  <p>
+    Además aprovechamos nuestras rutas de recolección para redistribuir tratamientos de diálisis
+    de donde no se requieren a quien los puede utilizar, siempre y cuando las cajas estén en buen
+    estado y la fecha de caducidad no haya pasado.
   </p>
 </section>
 
 <section class="card inicio-seccion">
   <h2>Nuestro impacto en el medio ambiente</h2>
-  <div class="inicio-destacado">
-    <span class="cifra-grande">100 kg</span>
-    <span>de PVC al año puede llegar a generar <strong>un solo paciente en diálisis peritoneal</strong>.</span>
-  </div>
   <p>Por cada kilo de PVC que reciclamos, en comparación con fabricar material nuevo, ahorramos:</p>
   <div class="inicio-impacto">
     {% for dato in impacto %}
@@ -115,12 +118,20 @@
 </section>
 
 <section class="card inicio-seccion">
-  <h2>¿Cómo funciona?</h2>
+  <h2>Si quieres participar en el programa, sigue estos pasos</h2>
   <ol class="inicio-pasos">
-    <li><strong>Te inscribes</strong><span>Revisas si ya tenemos ruta en tu zona y creas tu cuenta con tu número de WhatsApp.</span></li>
-    <li><strong>Te prestamos un bote</strong><span>Ahí vas juntando tu material, separado y seco, como te explicamos en un video corto.</span></li>
-    <li><strong>Te avisamos por WhatsApp</strong><span>Cuando tu recolección queda programada te mandamos el día y el horario aproximado.</span></li>
-    <li><strong>Pasamos por él</strong><span>Nuestro recolector llega a tu domicilio el día de tu ruta.</span></li>
+    <li>
+      <strong>Revisa si tenemos ruta en tu zona</strong>
+      <span>Escribe tu código postal:</span>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <input type="text" id="cp-verificar" placeholder="Código postal" maxlength="5" pattern="[0-9]*" inputmode="numeric" style="flex:1; min-width:140px; max-width:160px;">
+        <button type="button" id="btn-verificar-cp" class="small" style="margin-top:0;">Verificar</button>
+      </div>
+      <p id="resultado-cp" style="font-size:0.88rem; margin:8px 0 0;"></p>
+      <div id="opciones-cp" style="margin-top:6px;"></div>
+    </li>
+    <li><strong>Crea un usuario con tu número de WhatsApp</strong><span>Ahí recibirás toda la información necesaria.</span></li>
+    <li><strong>Llena el formulario</strong><span>En cuanto lo tengamos, programaremos la entrega de un bote a tu domicilio para que puedas recolectar tu material.</span></li>
   </ol>
 </section>
 
@@ -147,6 +158,58 @@
 </div>
 
 <script>
+const opcionesCp = document.getElementById('opciones-cp');
+const resultadoCp = document.getElementById('resultado-cp');
+
+function veredictoCp(r) {
+  opcionesCp.innerHTML = '';
+  if (r.cubierto) {
+    resultadoCp.style.color = 'var(--green-dark)';
+    resultadoCp.textContent = '✅ Sí, ya tenemos ruta en tu zona. Sigue con el paso 2.';
+  } else {
+    resultadoCp.style.color = 'var(--danger)';
+    resultadoCp.textContent = '⚠️ Por ahora no tenemos ruta en esa zona. Puedes registrarte y te avisaremos en cuanto la tengamos.';
+  }
+}
+
+async function verificarCp() {
+  const cp = document.getElementById('cp-verificar').value.trim();
+  opcionesCp.innerHTML = '';
+  if (!cp) {
+    resultadoCp.style.color = 'var(--muted)';
+    resultadoCp.textContent = 'Escribe tu código postal primero.';
+    return;
+  }
+  resultadoCp.style.color = 'var(--muted)';
+  resultadoCp.textContent = 'Buscando…';
+  try {
+    const resp = await fetch('/paciente/verificar-zona?cp=' + encodeURIComponent(cp));
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'No se pudo verificar.');
+    if (data.resultados.length === 1) {
+      veredictoCp(data.resultados[0]);
+      return;
+    }
+    resultadoCp.textContent = 'Encontramos varios lugares que podrían coincidir — elige el correcto:';
+    data.resultados.forEach((r) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'small secondary';
+      b.style.cssText = 'display:block; width:100%; text-align:left; margin-top:6px;';
+      b.textContent = r.etiqueta;
+      b.addEventListener('click', () => veredictoCp(r));
+      opcionesCp.appendChild(b);
+    });
+  } catch (e) {
+    resultadoCp.style.color = 'var(--danger)';
+    resultadoCp.textContent = e.message;
+  }
+}
+document.getElementById('btn-verificar-cp').addEventListener('click', verificarCp);
+document.getElementById('cp-verificar').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') verificarCp();
+});
+
 document.getElementById('btn-repvc').addEventListener('click', () => {
   const paso = document.getElementById('paso-repvc');
   paso.style.display = paso.style.display === 'none' ? 'block' : 'none';
