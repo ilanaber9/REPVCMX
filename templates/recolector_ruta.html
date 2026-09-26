@@ -10,7 +10,7 @@
   <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
     <h1 style="margin:0;">{{ ruta['nombre'] }}</h1>
   </div>
-  <p>Fecha: {{ ruta['fecha'] }} · Estado: <span class="badge {{ ruta['estado'] }}">{{ ruta['estado'] }}</span></p>
+  <p>Fecha: {{ ruta['fecha'] }} · Estado: <span class="badge {{ 'suspendida' if ruta['suspendida'] else ruta['estado'] }}">{{ 'suspendida' if ruta['suspendida'] else ruta['estado'] }}</span></p>
 
   {% if botes_pendientes %}
   <p style="background:#fff2d9; color:var(--warn); border-radius:8px; padding:10px 14px; font-weight:600;">

@@ -16,7 +16,7 @@
   </div>
   <p>
     Fecha: {{ ruta['fecha'] }} · Recolector: {{ ruta['recolector_nombre'] or 'sin asignar' }} ·
-    Estado: <span class="badge {{ ruta['estado'] }}">{{ ruta['estado'] }}</span>
+    Estado: <span class="badge {{ 'suspendida' if ruta['suspendida'] else ruta['estado'] }}">{{ 'suspendida' if ruta['suspendida'] else ruta['estado'] }}</span>
   </p>
   {% if tiempo_real %}
   <p style="font-size:0.9rem;">

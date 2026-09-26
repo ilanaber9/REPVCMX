@@ -1719,6 +1719,16 @@ def aplicar_migraciones_pendientes():
         if columna not in columnas_users:
             db.execute(f"ALTER TABLE users ADD COLUMN {columna} {definicion}")
 
+    columnas_rutas = {r["name"] for r in db.execute("PRAGMA table_info(rutas)")}
+    if "suspendida" not in columnas_rutas:
+        db.execute("ALTER TABLE rutas ADD COLUMN suspendida INTEGER NOT NULL DEFAULT 0")
+        # Las rutas suspendidas antes de existir esta columna se reconocen por la nota que
+        # recolector_suspender_ruta dejó en sus paradas.
+        db.execute(
+            "UPDATE rutas SET suspendida = 1 WHERE id IN "
+            "(SELECT ruta_id FROM paradas WHERE notas LIKE 'Ruta suspendida%')"
+        )
+
     tablas = {r["name"] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 
     if "horas_extra" not in tablas:
@@ -5680,7 +5690,9 @@ def recolector_suspender_ruta(user, ruta_id):
                     afectados[u2["telefono"]] = u2["name"]
 
     ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
-    db.execute("UPDATE rutas SET hora_fin_real = ?, estado = 'completada' WHERE id = ?", (ahora, ruta_id))
+    db.execute(
+        "UPDATE rutas SET hora_fin_real = ?, estado = 'completada', suspendida = 1 WHERE id = ?", (ahora, ruta_id)
+    )
     crear_notificacion_admin(
         db, None,
         f"El recolector '{user['name']}' suspendió la ruta '{ruta['nombre']}' — {nota} "

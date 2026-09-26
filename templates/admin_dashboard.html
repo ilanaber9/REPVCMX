@@ -17,7 +17,7 @@
 <div class="ruta-hoy">
   <div class="ruta-hoy-top">
     <a href="{{ url_for('admin_ver_ruta', ruta_id=r['id']) }}" style="font-weight:700; color:inherit; text-decoration:none;">{{ r['nombre'] }} →</a>
-    <span class="badge {{ r['estado'] }}">{{ r['estado'] }}</span>
+    <span class="badge {{ 'suspendida' if r['suspendida'] else r['estado'] }}">{{ 'suspendida' if r['suspendida'] else r['estado'] }}</span>
   </div>
   <div style="color:var(--muted); font-size:0.88rem; margin-top:4px;">
     {{ r['fecha'] }} · Recolector: {{ r['recolector_nombre'] or 'sin asignar' }} · {{ r['paradas_hechas'] }}/{{ r['total_paradas'] }} paradas ({{ pct }}%)
@@ -44,7 +44,7 @@
 <div class="ruta-hoy">
   <div class="ruta-hoy-top">
     <strong>{{ r['nombre'] }}</strong>
-    <span class="badge completada">completada</span>
+    <span class="badge {{ 'suspendida' if r['suspendida'] else 'completada' }}">{{ 'suspendida' if r['suspendida'] else 'completada' }}</span>
   </div>
   <div style="color:var(--muted); font-size:0.88rem; margin-top:4px;">
     {{ r['fecha'] }} · Recolector: {{ r['recolector_nombre'] or 'sin asignar' }} · {{ r['paradas_hechas'] }}/{{ r['total_paradas'] }} paradas

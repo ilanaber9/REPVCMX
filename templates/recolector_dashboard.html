@@ -18,7 +18,7 @@
         <td>{{ r['nombre'] }}</td>
         <td>{{ r['fecha'] }}</td>
         <td>{{ r['paradas_hechas'] }}/{{ r['total_paradas'] }}</td>
-        <td><span class="badge {{ r['estado'] }}">{{ r['estado'] }}</span></td>
+        <td><span class="badge {{ 'suspendida' if r['suspendida'] else r['estado'] }}">{{ 'suspendida' if r['suspendida'] else r['estado'] }}</span></td>
         <td><a class="btn small" href="{{ url_for('recolector_ver_ruta', ruta_id=r['id']) }}">Ver</a></td>
       </tr>
       {% endfor %}

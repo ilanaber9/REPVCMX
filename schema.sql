@@ -265,6 +265,7 @@ CREATE TABLE rutas (
   hora_fin_real TEXT,
   recolector_id INTEGER REFERENCES users(id),
   estado TEXT NOT NULL DEFAULT 'planificada' CHECK(estado IN ('planificada','en_curso','completada')),
+  suspendida INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 
