@@ -946,6 +946,23 @@ def telefono_identidad(raw):
     return digitos
 
 
+def buscar_personal(db, texto):
+    """Busca una cuenta del personal (administrador, recolector, NEF) por correo o por teléfono,
+    según lo que haya escrito la persona. Devuelve (usuario o None, identidad, es_telefono):
+    identidad es el correo en minúsculas o los 10 dígitos, y sirve para el bloqueo por intentos."""
+    texto = (texto or "").strip()
+    if "@" in texto:
+        correo = texto.lower()
+        return db.execute("SELECT * FROM users WHERE email = ?", (correo,)).fetchone(), correo, False
+    telefono = telefono_identidad(texto)
+    if telefono is None:
+        return None, texto, True
+    user = db.execute(
+        "SELECT * FROM users WHERE telefono = ? AND role != 'cliente'", (telefono,)
+    ).fetchone()
+    return user, telefono, True
+
+
 def telefono_whatsapp_e164(telefono_10_digitos):
     """Arma la dirección que espera la API de WhatsApp para un número mexicano de 10 dígitos.
     WhatsApp usa un "1" extra después del 52 para México (no se marca así al llamar, pero así
@@ -1979,7 +1996,8 @@ def login():
             telefono = telefono_identidad(request.form.get("telefono", ""))
             identidad = telefono or request.form.get("telefono", "").strip()
         else:
-            identidad = request.form.get("email", "").strip().lower()
+            texto_identidad = request.form.get("identidad") or request.form.get("email", "")
+            user_personal, identidad, _ = buscar_personal(db, texto_identidad)
         if login_bloqueado(db, identidad):
             flash(
                 f"Demasiados intentos fallidos. Espera {MINUTOS_BLOQUEO_LOGIN} minutos antes de "
@@ -1993,15 +2011,15 @@ def login():
             ).fetchone()
             error_no_existe = "Ese número de WhatsApp no está registrado."
         else:
-            user = db.execute("SELECT * FROM users WHERE email = ?", (identidad,)).fetchone()
-            error_no_existe = "Este correo no está registrado."
+            user = user_personal
+            error_no_existe = "Ese correo o teléfono no está registrado."
         if user is None:
             registrar_intento_login(db, identidad, exitoso=False)
             flash(error_no_existe, "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         if not check_password_hash(user["password_hash"], password):
             registrar_intento_login(db, identidad, exitoso=False)
-            error_password = "Número de WhatsApp o contraseña incorrectos." if tipo == "cliente" else "Correo o contraseña incorrectos."
+            error_password = "Número de WhatsApp o contraseña incorrectos." if tipo == "cliente" else "Correo, teléfono o contraseña incorrectos."
             flash(error_password, "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         if tipo and TIPO_LOGIN_ROLES.get(tipo) != user["role"]:
@@ -2032,10 +2050,12 @@ def olvide_password():
             user = db.execute(
                 "SELECT * FROM users WHERE telefono = ? AND role = 'cliente'", (telefono,)
             ).fetchone()
+            por_telefono = True
         else:
-            email = request.form.get("email", "").strip().lower()
-            user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        if user and tipo == "cliente":
+            user, _identidad, por_telefono = buscar_personal(
+                db, request.form.get("identidad") or request.form.get("email", "")
+            )
+        if user and por_telefono:
             # Categoría AUTHENTICATION de WhatsApp (obligatoria para este tipo de aviso) solo
             # permite mandar un código, nunca un link — por eso el paciente escribe el código
             # aquí en vez de dar clic, a diferencia de admin/recolector/nef que sí tienen correo.
@@ -2068,9 +2088,12 @@ def olvide_password():
                 "Si tú no pediste esto, ignora este mensaje."
             )
             enviar_email(user["email"], "Recuperar contraseña — RE-PVC", cuerpo)
-        if tipo == "cliente":
+        if por_telefono:
             flash("Si ese número de WhatsApp está registrado, te enviamos un código para restablecer tu contraseña.", "success")
-            return redirect(url_for("restablecer_password_codigo", telefono=request.form.get("telefono", "")))
+            return redirect(url_for(
+                "restablecer_password_codigo",
+                telefono=request.form.get("telefono") or request.form.get("identidad") or request.form.get("email", ""),
+            ))
         flash("Si ese correo está registrado, te enviamos un enlace para restablecer tu contraseña.", "success")
         return redirect(url_for("login", tipo=tipo))
     tipo = request.args.get("tipo") or None
@@ -2121,9 +2144,7 @@ def restablecer_password_codigo():
         password = request.form.get("password", "")
         password2 = request.form.get("password2", "")
         db = get_db()
-        user = db.execute(
-            "SELECT * FROM users WHERE telefono = ? AND role = 'cliente'", (telefono,)
-        ).fetchone()
+        user = db.execute("SELECT * FROM users WHERE telefono = ?", (telefono,)).fetchone()
         valido = user is not None and user["reset_token"] == codigo and codigo != ""
         if valido and user["reset_token_expira"]:
             try:
@@ -2146,7 +2167,8 @@ def restablecer_password_codigo():
         )
         db.commit()
         flash("Contraseña actualizada. Ya puedes iniciar sesión.", "success")
-        return redirect(url_for("login", tipo="cliente"))
+        tipo_login = next((t for t, rol in TIPO_LOGIN_ROLES.items() if rol == user["role"]), "cliente")
+        return redirect(url_for("login", tipo=tipo_login))
     return render_template("restablecer_password_codigo.html", telefono=request.args.get("telefono", ""))
 
 
@@ -4766,30 +4788,79 @@ def admin_agregar_paciente_ruta(user, ruta_id):
     return redirect(url_for("admin_ver_ruta", ruta_id=ruta_id))
 
 
-@app.route("/admin/administradores/nuevo", methods=["POST"])
-@login_required("admin")
-def admin_nuevo_admin(user):
-    if not user["es_admin_general"]:
+def _crear_cuenta_personal(role, es_admin_general, mensaje_ok):
+    """Alta de una cuenta del personal (administrador, recolector, NEF). Se puede dar correo,
+    teléfono o ambos —al menos uno—: con cualquiera de los dos se inicia sesión."""
+    if not current_user()["es_admin_general"]:
         flash("Solo el administrador general puede crear cuentas.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
     name = request.form["name"].strip()
-    email = request.form["email"].strip().lower()
+    email = request.form.get("email", "").strip().lower() or None
+    telefono_crudo = request.form.get("telefono", "").strip()
     password = request.form["password"]
     if len(password) < PASSWORD_MIN_LENGTH:
         flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
+    telefono = None
+    if telefono_crudo:
+        telefono = telefono_identidad(telefono_crudo)
+        if telefono is None:
+            flash("Escribe un teléfono válido de 10 dígitos.", "error")
+            return redirect(url_for("admin_dashboard", tab="recolectores"))
+    if not email and not telefono:
+        flash("Escribe un correo o un teléfono para la cuenta.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db = get_db()
-    existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-    if existing:
+    if email and db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone():
         flash("Ese correo ya está registrado.", "error")
         return redirect(url_for("admin_dashboard", tab="recolectores"))
+    if telefono and db.execute("SELECT id FROM users WHERE telefono = ?", (telefono,)).fetchone():
+        flash("Ese teléfono ya está registrado en otra cuenta.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
     db.execute(
-        "INSERT INTO users (name, email, password_hash, role, es_admin_general) VALUES (?, ?, ?, 'admin', 0)",
-        (name, email, generate_password_hash(password, method="pbkdf2:sha256")),
+        "INSERT INTO users (name, email, telefono, password_hash, role, es_admin_general) VALUES (?, ?, ?, ?, ?, ?)",
+        (name, email, telefono, generate_password_hash(password, method="pbkdf2:sha256"), role, es_admin_general),
     )
     db.commit()
-    flash(f"Cuenta de administrador '{name}' creada.", "success")
+    flash(mensaje_ok.format(name=name), "success")
     return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
+@app.route("/admin/usuarios/<int:user_id>/telefono", methods=["POST"])
+@login_required("admin")
+def admin_actualizar_telefono_personal(user, user_id):
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede cambiar estos datos.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db = get_db()
+    r = db.execute("SELECT * FROM users WHERE id = ? AND role != 'cliente'", (user_id,)).fetchone()
+    if r is None:
+        flash("Esa cuenta ya no existe.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    crudo = request.form.get("telefono", "").strip()
+    telefono = None
+    if crudo:
+        telefono = telefono_identidad(crudo)
+        if telefono is None:
+            flash("Escribe un teléfono válido de 10 dígitos.", "error")
+            return redirect(url_for("admin_dashboard", tab="recolectores"))
+        otro = db.execute("SELECT id FROM users WHERE telefono = ? AND id != ?", (telefono, user_id)).fetchone()
+        if otro:
+            flash("Ese teléfono ya está registrado en otra cuenta.", "error")
+            return redirect(url_for("admin_dashboard", tab="recolectores"))
+    elif not r["email"]:
+        flash("La cuenta necesita al menos un correo o un teléfono para poder entrar.", "error")
+        return redirect(url_for("admin_dashboard", tab="recolectores"))
+    db.execute("UPDATE users SET telefono = ? WHERE id = ?", (telefono, user_id))
+    db.commit()
+    flash(f"Teléfono de '{r['name']}' actualizado." if telefono else f"Se quitó el teléfono de '{r['name']}'.", "success")
+    return redirect(url_for("admin_dashboard", tab="recolectores"))
+
+
+@app.route("/admin/administradores/nuevo", methods=["POST"])
+@login_required("admin")
+def admin_nuevo_admin(user):
+    return _crear_cuenta_personal("admin", 0, "Cuenta de administrador '{name}' creada.")
 
 
 @app.route("/admin/administradores/<int:user_id>/eliminar", methods=["POST"])
@@ -4840,27 +4911,7 @@ def admin_restablecer_password_admin(user, user_id):
 @app.route("/admin/usuarios/nuevo", methods=["POST"])
 @login_required("admin")
 def admin_nuevo_recolector(user):
-    if not user["es_admin_general"]:
-        flash("Solo el administrador general puede crear cuentas.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    name = request.form["name"].strip()
-    email = request.form["email"].strip().lower()
-    password = request.form["password"]
-    if len(password) < PASSWORD_MIN_LENGTH:
-        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    db = get_db()
-    existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-    if existing:
-        flash("Ese correo ya está registrado.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    db.execute(
-        "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'recolector')",
-        (name, email, generate_password_hash(password, method="pbkdf2:sha256")),
-    )
-    db.commit()
-    flash(f"Recolector '{name}' creado.", "success")
-    return redirect(url_for("admin_dashboard", tab="recolectores"))
+    return _crear_cuenta_personal("recolector", 0, "Recolector '{name}' creado.")
 
 
 @app.route("/admin/usuarios/<int:user_id>/eliminar", methods=["POST"])
@@ -4918,27 +4969,7 @@ def admin_restablecer_password_recolector(user, user_id):
 @app.route("/admin/nef/nuevo", methods=["POST"])
 @login_required("admin")
 def admin_nuevo_nef(user):
-    if not user["es_admin_general"]:
-        flash("Solo el administrador general puede crear cuentas.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    name = request.form["name"].strip()
-    email = request.form["email"].strip().lower()
-    password = request.form["password"]
-    if len(password) < PASSWORD_MIN_LENGTH:
-        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    db = get_db()
-    existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-    if existing:
-        flash("Ese correo ya está registrado.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    db.execute(
-        "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'nef')",
-        (name, email, generate_password_hash(password, method="pbkdf2:sha256")),
-    )
-    db.commit()
-    flash(f"Cuenta de NEF '{name}' creada.", "success")
-    return redirect(url_for("admin_dashboard", tab="recolectores"))
+    return _crear_cuenta_personal("nef", 0, "Cuenta de NEF '{name}' creada.")
 
 
 @app.route("/admin/nef/<int:user_id>/eliminar", methods=["POST"])
@@ -4985,27 +5016,7 @@ def admin_restablecer_password_nef(user, user_id):
 @app.route("/admin/administradores-generales/nuevo", methods=["POST"])
 @login_required("admin")
 def admin_nuevo_admin_general(user):
-    if not user["es_admin_general"]:
-        flash("Solo el administrador general puede crear cuentas.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    name = request.form["name"].strip()
-    email = request.form["email"].strip().lower()
-    password = request.form["password"]
-    if len(password) < PASSWORD_MIN_LENGTH:
-        flash(f"La contraseña debe tener al menos {PASSWORD_MIN_LENGTH} caracteres.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    db = get_db()
-    existing = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-    if existing:
-        flash("Ese correo ya está registrado.", "error")
-        return redirect(url_for("admin_dashboard", tab="recolectores"))
-    db.execute(
-        "INSERT INTO users (name, email, password_hash, role, es_admin_general) VALUES (?, ?, ?, 'admin', 1)",
-        (name, email, generate_password_hash(password, method="pbkdf2:sha256")),
-    )
-    db.commit()
-    flash(f"Cuenta de administrador general '{name}' creada.", "success")
-    return redirect(url_for("admin_dashboard", tab="recolectores"))
+    return _crear_cuenta_personal("admin", 1, "Cuenta de administrador general '{name}' creada.")
 
 
 @app.route("/admin/administradores-generales/<int:user_id>/eliminar", methods=["POST"])

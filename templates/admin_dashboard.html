@@ -1,4 +1,11 @@
 {% extends "base.html" %}
+{% macro telefono_form(r) %}
+<form class="inline" method="post" action="{{ url_for('admin_actualizar_telefono_personal', user_id=r['id']) }}"
+      style="display:flex; gap:6px; align-items:center; margin-top:8px;">
+  <input type="tel" name="telefono" placeholder="Teléfono (10 dígitos)" value="{{ r['telefono'] or '' }}" maxlength="14" style="width:180px;">
+  <button type="submit" class="small secondary">Guardar teléfono</button>
+</form>
+{% endmacro %}
 {% block title %}Panel de administración{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
@@ -354,8 +361,10 @@
     <form method="post" action="{{ url_for('admin_nuevo_admin') }}">
       <label>Nombre</label>
       <input type="text" name="name" required>
-      <label>Correo</label>
-      <input type="email" name="email" required>
+      <label>Correo <span style="color:var(--muted); font-weight:400;">(opcional si pones teléfono)</span></label>
+      <input type="email" name="email">
+      <label>Teléfono <span style="color:var(--muted); font-weight:400;">(opcional si pones correo)</span></label>
+      <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="14">
       <label>Contraseña</label>
       <input type="password" name="password" required minlength="8">
       <button type="submit">Crear administrador</button>
@@ -368,7 +377,8 @@
     <ul class="checklist">
       {% for r in cuentas_admin %}
       <li>
-        <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
+        <strong>{{ r['name'] }}</strong> — {{ r['email'] or 'sin correo' }} · {{ r['telefono'] or 'sin teléfono' }}
+        {{ telefono_form(r) }}
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
           <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_admin', user_id=r['id']) }}"
                 style="display:flex; gap:6px; align-items:center;">
@@ -393,8 +403,10 @@
     <form method="post" action="{{ url_for('admin_nuevo_recolector') }}">
       <label>Nombre</label>
       <input type="text" name="name" required>
-      <label>Correo</label>
-      <input type="email" name="email" required>
+      <label>Correo <span style="color:var(--muted); font-weight:400;">(opcional si pones teléfono)</span></label>
+      <input type="email" name="email">
+      <label>Teléfono <span style="color:var(--muted); font-weight:400;">(opcional si pones correo)</span></label>
+      <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="14">
       <label>Contraseña</label>
       <input type="password" name="password" required minlength="8">
       <button type="submit">Crear recolector</button>
@@ -407,7 +419,8 @@
     <ul class="checklist">
       {% for r in recolectores %}
       <li>
-        <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
+        <strong>{{ r['name'] }}</strong> — {{ r['email'] or 'sin correo' }} · {{ r['telefono'] or 'sin teléfono' }}
+        {{ telefono_form(r) }}
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
           <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_recolector', user_id=r['id']) }}"
                 style="display:flex; gap:6px; align-items:center;">
@@ -434,8 +447,10 @@
     <form method="post" action="{{ url_for('admin_nuevo_nef') }}">
       <label>Nombre</label>
       <input type="text" name="name" required>
-      <label>Correo</label>
-      <input type="email" name="email" required>
+      <label>Correo <span style="color:var(--muted); font-weight:400;">(opcional si pones teléfono)</span></label>
+      <input type="email" name="email">
+      <label>Teléfono <span style="color:var(--muted); font-weight:400;">(opcional si pones correo)</span></label>
+      <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="14">
       <label>Contraseña</label>
       <input type="password" name="password" required minlength="8">
       <button type="submit">Crear cuenta de NEF</button>
@@ -448,7 +463,8 @@
     <ul class="checklist">
       {% for r in cuentas_nef %}
       <li>
-        <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
+        <strong>{{ r['name'] }}</strong> — {{ r['email'] or 'sin correo' }} · {{ r['telefono'] or 'sin teléfono' }}
+        {{ telefono_form(r) }}
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
           <form class="inline" method="post" action="{{ url_for('admin_restablecer_password_nef', user_id=r['id']) }}"
                 style="display:flex; gap:6px; align-items:center;">
@@ -478,8 +494,10 @@
     <form method="post" action="{{ url_for('admin_nuevo_admin_general') }}">
       <label>Nombre</label>
       <input type="text" name="name" required>
-      <label>Correo</label>
-      <input type="email" name="email" required>
+      <label>Correo <span style="color:var(--muted); font-weight:400;">(opcional si pones teléfono)</span></label>
+      <input type="email" name="email">
+      <label>Teléfono <span style="color:var(--muted); font-weight:400;">(opcional si pones correo)</span></label>
+      <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="14">
       <label>Contraseña</label>
       <input type="password" name="password" required minlength="8">
       <button type="submit">Crear administrador general</button>
@@ -492,7 +510,8 @@
     <ul class="checklist">
       {% for r in cuentas_admin_general %}
       <li>
-        <strong>{{ r['name'] }}</strong> — {{ r['email'] }}
+        <strong>{{ r['name'] }}</strong> — {{ r['email'] or 'sin correo' }} · {{ r['telefono'] or 'sin teléfono' }}
+        {{ telefono_form(r) }}
         <form class="inline" method="post" action="{{ url_for('admin_eliminar_admin_general', user_id=r['id']) }}"
               style="margin-top:8px;"
               onsubmit="return confirm('¿Dar de baja a \'{{ r['name'] }}\' como administrador general? No podrá volver a entrar.');">

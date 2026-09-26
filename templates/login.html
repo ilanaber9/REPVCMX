@@ -13,8 +13,8 @@
       <input type="tel" name="telefono" placeholder="55 1234 5678" maxlength="10" pattern="[0-9 ]*" required autofocus style="flex:1;">
     </div>
     {% else %}
-    <label>Correo</label>
-    <input type="email" name="email" required autofocus>
+    <label>Correo o teléfono</label>
+    <input type="text" name="identidad" placeholder="correo@ejemplo.com o 55 1234 5678" required autofocus autocomplete="username">
     {% endif %}
     <label>Contraseña</label>
     <input type="password" name="password" required>
