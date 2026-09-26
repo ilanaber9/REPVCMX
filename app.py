@@ -116,7 +116,18 @@ CAUSA_ENFERMEDAD_LABELS = {
 # otras) en vez de confiar en la hora local del sistema — en Render el servidor corre en UTC, así
 # que datetime.now() o datetime('now','localtime') ahí NO son la hora de Ciudad de México.
 ZONA_HORARIA_NEGOCIO = ZoneInfo("America/Mexico_City")
-HORA_CORTE_AVISOS_NOCTURNO = dtime(21, 0)  # después de esta hora, un aviso de ruta programada se
+def _hora_corte_avisos():
+    """9:00pm por defecto; se puede cambiar con la variable HORA_CORTE_AVISOS (formato HH:MM),
+    por ejemplo para hacer pruebas de noche. Si el valor no es válido, se usa el de siempre."""
+    valor = os.environ.get("HORA_CORTE_AVISOS", "").strip()
+    try:
+        h, m = (int(x) for x in valor.split(":"))
+        return dtime(h, m)
+    except ValueError:
+        return dtime(21, 0)
+
+
+HORA_CORTE_AVISOS_NOCTURNO = _hora_corte_avisos()  # después de esta hora, un aviso de ruta programada se
 # pospone hasta la mañana siguiente en vez de mandarse de inmediato, para no interrumpir el
 # descanso del paciente.
 HORA_ENVIO_AVISOS_MATUTINO = dtime(7, 0)
