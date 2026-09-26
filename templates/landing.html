@@ -35,7 +35,6 @@
   .kg-contador .kg-titulo { font-size: 0.95rem; color: var(--muted); margin: 0; }
   .kg-contador .kg-cifra { font-size: 2.6rem; font-weight: 800; color: var(--green-dark); line-height: 1.15; margin: 4px 0; }
   .kg-contador .kg-cifra small { font-size: 1.2rem; font-weight: 700; }
-  .kg-contador .kg-pie { font-size: 0.85rem; color: var(--muted); margin: 0; }
 
   .inicio-seccion h2 { font-size: 1.25rem; margin-bottom: 6px; }
   .inicio-seccion > p { color: var(--muted); line-height: 1.55; margin-top: 0; }
@@ -98,7 +97,6 @@
 <section class="kg-contador">
   <p class="kg-titulo">Material reciclado hasta hoy</p>
   <p class="kg-cifra"><span id="kg-valor">{{ "{:,.1f}".format(kg_reciclados) }}</span> <small>kg</small></p>
-  <p class="kg-pie">Se actualiza con cada recolección que registran nuestros recolectores.</p>
 </section>
 
 <section class="card inicio-seccion">
