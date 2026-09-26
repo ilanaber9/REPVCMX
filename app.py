@@ -796,7 +796,6 @@ def _notificar_paradas_programadas(parada_ids):
                 {
                     "1": paciente["name"], "2": fecha_horario,
                     "3": parada["recolector_nombre"] or "por asignar", "4": parada["direccion"],
-                    "5": link_si, "6": link_no,
                 },
                 cuerpo,
             )
@@ -2096,6 +2095,23 @@ def marcar_parada_ausente_por_rechazo(db, parada_id):
     return parada["ruta_id"], parada["lat"], parada["lon"], parada["solicitud_id"]
 
 
+def registrar_confirmacion_parada(db, parada_id, respuesta):
+    """Guarda si el paciente podrá recibir la recolección ('si' o 'no'). Si dijo que no, saca la
+    parada de la ruta y trata de llenar el hueco. Lo usan tanto el enlace de confirmación como
+    los botones de WhatsApp."""
+    db.execute("UPDATE paradas SET confirmado_paciente = ? WHERE id = ?", (respuesta, parada_id))
+    if respuesta == "no":
+        resultado = marcar_parada_ausente_por_rechazo(db, parada_id)
+        db.commit()
+        if resultado:
+            ruta_id, lat, lon, solicitud_id = resultado
+            intentar_llenar_hueco_ausente(
+                db, ruta_id, lat, lon, solicitud_id_ausente=solicitud_id
+            )
+    else:
+        db.commit()
+
+
 @app.route("/parada/<token>/confirmar", methods=["GET", "POST"])
 def parada_confirmar(token):
     """El GET solo muestra la página con el botón de confirmar, sin actualizar nada — ver el
@@ -2115,17 +2131,7 @@ def parada_confirmar(token):
         return render_template("parada_confirmar.html", valido=False), 404
     if request.method == "GET":
         return render_template("parada_confirmar.html", valido=True, pendiente=True, respuesta=respuesta, parada=parada)
-    db.execute("UPDATE paradas SET confirmado_paciente = ? WHERE id = ?", (respuesta, parada["id"]))
-    if respuesta == "no":
-        resultado = marcar_parada_ausente_por_rechazo(db, parada["id"])
-        db.commit()
-        if resultado:
-            ruta_id, lat, lon, solicitud_id = resultado
-            intentar_llenar_hueco_ausente(
-                db, ruta_id, lat, lon, solicitud_id_ausente=solicitud_id
-            )
-    else:
-        db.commit()
+    registrar_confirmacion_parada(db, parada["id"], respuesta)
     return render_template("parada_confirmar.html", valido=True, respuesta=respuesta, parada=parada)
 
 
@@ -5737,6 +5743,29 @@ def cliente_confirmar_asistencia(user, publicacion_id):
     return redirect(url_for("cliente_dashboard", tab="nef"))
 
 
+def _procesar_respuesta_boton_parada(remitente, respuesta):
+    """Un paciente tocó Sí/No en el aviso de ruta programada. Lo identifica por su número de
+    WhatsApp y confirma su parada pendiente más próxima. Devuelve el texto con que se le
+    contesta, o None si no se encontró una parada por confirmar."""
+    digitos = re.sub(r"\D", "", remitente or "")[-10:]
+    if len(digitos) != 10:
+        return None
+    db = get_db()
+    parada = db.execute(
+        "SELECT p.id FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+        "JOIN users u ON u.id = s.cliente_id JOIN rutas r ON r.id = p.ruta_id "
+        "WHERE u.telefono = ? AND p.estado = 'pendiente' AND p.confirmacion_token IS NOT NULL "
+        "AND p.confirmado_paciente IS NULL ORDER BY r.fecha ASC, p.id DESC LIMIT 1",
+        (digitos,),
+    ).fetchone()
+    if parada is None:
+        return None
+    registrar_confirmacion_parada(db, parada["id"], respuesta)
+    if respuesta == "si":
+        return "¡Gracias! Quedó confirmada tu recolección. Te avisaremos cuando el recolector vaya en camino."
+    return "Entendido, cancelamos esta recolección. Te avisaremos cuando podamos reprogramarla."
+
+
 @app.route("/webhook/whatsapp", methods=["POST"])
 def webhook_whatsapp():
     """Recibe los mensajes entrantes de WhatsApp que reenvía Twilio (sandbox o número real).
@@ -5752,9 +5781,13 @@ def webhook_whatsapp():
 
     remitente = request.form.get("From", "")
     cuerpo = request.form.get("Body", "")
-    print(f"[webhook_whatsapp] Mensaje de {remitente}: {cuerpo!r}")
+    boton = (request.form.get("ButtonPayload") or request.form.get("ButtonText") or "").strip().lower()
+    print(f"[webhook_whatsapp] Mensaje de {remitente}: {cuerpo!r} boton={boton!r}")
 
     respuesta_texto = "Gracias por tu mensaje. Por ahora este número no atiende respuestas — para dudas, contáctanos directamente."
+    respuesta_boton = {"confirmar_si": "si", "sí": "si", "si": "si", "confirmar_no": "no", "no": "no"}.get(boton)
+    if respuesta_boton:
+        respuesta_texto = _procesar_respuesta_boton_parada(remitente, respuesta_boton) or respuesta_texto
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         f"<Response><Message>{respuesta_texto}</Message></Response>"
