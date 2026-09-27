@@ -407,7 +407,10 @@ def _duracion_aproximada_paquete(puntos):
         return len(puntos) * MINUTOS_POR_PARADA
     secuencia = [(DEPOT_LAT, DEPOT_LON)] + coords + [(DEPOT_LAT, DEPOT_LON)]
     km = sum(haversine_km(*secuencia[i], *secuencia[i + 1]) for i in range(len(secuencia) - 1))
-    minutos_manejo = km / VELOCIDAD_PROMEDIO_KMH * 60 * FACTOR_TRAFICO
+    # Sin FACTOR_TRAFICO: VELOCIDAD_PROMEDIO_KMH ya es una velocidad promedio real (con tráfico
+    # incluido), igual que en la rama de respaldo de estimar_ruta. Aplicar el factor aquí encima
+    # penalizaba el tiempo dos veces y partía rutas en tandas mucho más chicas de lo necesario.
+    minutos_manejo = km / VELOCIDAD_PROMEDIO_KMH * 60
     return minutos_manejo + len(coords) * MINUTOS_POR_PARADA
 
 
