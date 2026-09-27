@@ -4027,21 +4027,25 @@ def admin_nuevo_movimiento_almacen(user):
     return redirect(url_for("admin_dashboard", tab=subtab))
 
 
-def _listo_desde_sql():
-    dias_caso = f"CASE WHEN modalidad = 'compra' THEN {DIAS_ESPERA_COMPRA} ELSE {DIAS_ESPERA_DONACION} END"
+def _listo_desde_sql(alias=""):
+    p = f"{alias}." if alias else ""
+    dias_caso = f"CASE WHEN {p}modalidad = 'compra' THEN {DIAS_ESPERA_COMPRA} ELSE {DIAS_ESPERA_DONACION} END"
     return (
-        "CASE WHEN fecha_reinicio_espera IS NULL THEN created_at "
-        f"ELSE datetime(fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') END"
+        f"CASE WHEN {p}fecha_reinicio_espera IS NULL THEN {p}created_at "
+        f"ELSE datetime({p}fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') END"
     )
 
 
-def armar_ruta_sugerida(db):
-    """Arma la siguiente ruta sin depender de zonas: parte del paciente que más lleva esperando su
-    recolección y le va sumando, siempre el más cercano al grupo que ya tiene, mientras la ruta siga
-    cabiendo en el tope de tiempo (7:30 h, o el extendido si hay pacientes lejanos). Los que no
-    caben se saltan y se prueba con el siguiente más cercano, para juntar la mayor cantidad posible.
-    Devuelve None si no hay a quién programar, o un dict con el grupo (ya en orden de visita), su
-    estimado real por calles, quién es el paciente de partida y cuántos quedaron fuera por cajas."""
+def armar_ruta_sugerida(db, semilla_id=None):
+    """Arma la siguiente ruta sin depender de zonas: por default parte del paciente que más lleva
+    esperando su recolección y le va sumando, siempre el más cercano al grupo que ya tiene, mientras
+    la ruta siga cabiendo en el tope de tiempo (7:30 h, o el extendido si hay pacientes lejanos). Los
+    que no caben se saltan y se prueba con el siguiente más cercano, para juntar la mayor cantidad
+    posible. Si se pasa semilla_id, esa solicitud puntual se usa como punto de partida en vez del que
+    más lleva esperando (para armar una ruta manual alrededor de un paciente elegido a mano); si ese
+    id ya no está disponible, devuelve {"error": True}. Devuelve None si no hay a quién programar, o
+    un dict con el grupo (ya en orden de visita), su estimado real por calles, quién es el paciente de
+    partida y cuántos quedaron fuera por cajas."""
     listo_desde = _listo_desde_sql()
     filas = db.execute(
         f"SELECT id, estado, lat, lon, cliente_id, direccion, {listo_desde} AS listo_desde, "
@@ -4058,9 +4062,14 @@ def armar_ruta_sugerida(db):
         u["listo_desde"], u["dias_espera"] = espera.get(u["id"], (None, 0))
     unidades.sort(key=lambda u: (u["listo_desde"] or "", u["id"]))
 
-    semilla = unidades[0]
+    if semilla_id is not None:
+        semilla = next((u for u in unidades if u["id"] == semilla_id or u["extra_id"] == semilla_id), None)
+        if semilla is None:
+            return {"error": True}
+    else:
+        semilla = unidades[0]
     grupo = [semilla]
-    restantes = unidades[1:]
+    restantes = [u for u in unidades if u is not semilla]
     dmin = {u["id"]: haversine_km(semilla["lat"], semilla["lon"], u["lat"], u["lon"]) for u in restantes}
     rechazados = []
     while restantes:
@@ -4122,7 +4131,24 @@ def _ids_de_grupo(grupo):
 def admin_ruta_sugerida(user):
     db = get_db()
     recolectores = db.execute("SELECT * FROM users WHERE role = 'recolector' ORDER BY name").fetchall()
-    sugerida = armar_ruta_sugerida(db)
+    paciente_id = request.args.get("paciente_id", type=int)
+    sugerida = armar_ruta_sugerida(db, semilla_id=paciente_id)
+    if sugerida and sugerida.get("error"):
+        flash(
+            "Ese paciente ya no está disponible para armar una ruta (se programó, cambió de "
+            "estado o dejó de tener ubicación). Se muestra la sugerencia automática.", "error"
+        )
+        paciente_id = None
+        sugerida = armar_ruta_sugerida(db)
+    # Para el selector "armar alrededor de este paciente": los mismos pendientes que puede tomar
+    # armar_ruta_sugerida como semilla (con ubicación y ya listos para recolectarse).
+    candidatos = db.execute(
+        "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, "
+        f"CAST(julianday('now', 'localtime') - julianday({_listo_desde_sql('s')}) AS INTEGER) AS dias_espera "
+        "FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
+        "WHERE s.estado IN ('pendiente', 'pendiente_entrega') AND s.lat IS NOT NULL AND s.lon IS NOT NULL "
+        f"AND {condicion_lista_para_recoleccion('s')} ORDER BY nombre"
+    ).fetchall()
     filas = []
     if sugerida:
         for i, u in enumerate(sugerida["grupo"], start=1):
@@ -4134,12 +4160,23 @@ def admin_ruta_sugerida(user):
                 "orden": i, "nombre": sol["nombre"], "direccion": sol["direccion"], "tipo": u["tipo"],
                 "dias_espera": u.get("dias_espera") or 0,
             })
+    # El grupo se reordena por cercanía a partir del depósito para manejar el recorrido más
+    # eficiente, así que quien queda primero en "filas" no siempre es la semilla (quien más
+    # esperaba, o el paciente elegido a mano); para el texto "Empieza por.../Armada alrededor
+    # de..." se necesita el nombre de la semilla en sí, no el de la primera parada del recorrido.
+    semilla_nombre = None
+    if sugerida:
+        for i, u in enumerate(sugerida["grupo"]):
+            if u["id"] == sugerida["semilla"]["id"]:
+                semilla_nombre = filas[i]["nombre"]
+                break
     return render_template(
         "admin_ruta_sugerida.html", sugerida=sugerida, filas=filas, recolectores=recolectores,
         hoy=ahora_negocio().date().isoformat(), minimo=MIN_PARADAS_DESPACHO,
         ids=",".join(str(i) for i in _ids_de_grupo(sugerida["grupo"])) if sugerida else "",
         puntos=[{"lat": u["lat"], "lon": u["lon"], "orden": i} for i, u in enumerate(sugerida["grupo"], 1)] if sugerida else [],
         geometria=sugerida["estimado"]["geometria"] if sugerida and sugerida["estimado"] else None,
+        candidatos=candidatos, paciente_id=paciente_id, semilla_nombre=semilla_nombre,
     )
 
 

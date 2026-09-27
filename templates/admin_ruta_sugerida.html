@@ -9,6 +9,29 @@
   <a href="{{ url_for('admin_dashboard', tab='rutas') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
   <h1>Ruta sugerida</h1>
 
+  <details style="margin:10px 0;"{% if paciente_id %} open{% endif %}>
+    <summary style="cursor:pointer; color:var(--muted); font-size:0.9rem;">
+      ¿Prefieres armar la ruta a mano, alrededor de un paciente en particular?
+    </summary>
+    <form method="get" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+      <div>
+        <label for="campo-paciente">Paciente</label>
+        <select name="paciente_id" id="campo-paciente" style="max-width:340px;">
+          <option value="">Elige un paciente…</option>
+          {% for cand in candidatos %}
+          <option value="{{ cand['id'] }}" {% if paciente_id == cand['id'] %}selected{% endif %}>
+            {{ cand['nombre'] }} — {{ cand['direccion'] }} ({{ cand['dias_espera'] }} día{{ '' if cand['dias_espera'] == 1 else 's' }} esperando)
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit">Armar ruta alrededor de él</button>
+      {% if paciente_id %}
+      <a class="btn secondary" href="{{ url_for('admin_ruta_sugerida') }}">Volver a la sugerencia automática</a>
+      {% endif %}
+    </form>
+  </details>
+
   {% if not sugerida %}
   <p class="empty">No hay pacientes listos para programar por ahora.</p>
   {% else %}
@@ -22,7 +45,11 @@
     {% if sugerida.estimado %}· tiempo estimado ida y vuelta: <strong>{{ sugerida.estimado.duracion }}</strong> ({{ sugerida.estimado.distancia_km }} km){% endif %}
   </p>
   <p style="color:var(--muted); font-size:0.88rem;">
-    Empieza por {{ filas[0].nombre }}{% if sugerida.semilla.dias_espera %}, que lleva {{ sugerida.semilla.dias_espera }} día{{ '' if sugerida.semilla.dias_espera == 1 else 's' }} esperando{% endif %}.
+    {% if paciente_id %}
+    Armada a mano alrededor de {{ semilla_nombre }}{% if sugerida.semilla.dias_espera %} (lleva {{ sugerida.semilla.dias_espera }} día{{ '' if sugerida.semilla.dias_espera == 1 else 's' }} esperando){% endif %}.
+    {% else %}
+    Empieza por {{ semilla_nombre }}{% if sugerida.semilla.dias_espera %}, que lleva {{ sugerida.semilla.dias_espera }} día{{ '' if sugerida.semilla.dias_espera == 1 else 's' }} esperando{% endif %}.
+    {% endif %}
   </p>
   {% if filas|length < minimo %}
   <p style="color:var(--danger); font-size:0.9rem;">
