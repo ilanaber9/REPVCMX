@@ -4200,12 +4200,14 @@ def admin_crear_ruta_sugerida(user):
         flash("Falta elegir: " + ", ".join(faltan or ["pacientes"]) + ". No se creó la ruta.", "error")
         return redirect(url_for("admin_ruta_sugerida"))
     db = get_db()
-    try:
-        db.execute("BEGIN IMMEDIATE")
-    except sqlite3.OperationalError:
-        flash("Ya se está generando otra ruta en este momento. Revisa el panel antes de reintentar.", "error")
-        return redirect(url_for("admin_dashboard", tab="rutas"))
     marcadores = ",".join("?" * len(ids))
+    # Todo lo que sigue hasta el BEGIN IMMEDIATE es de solo lectura o llama al servicio externo de
+    # mapas (estimar_ruta), que puede tardar varios segundos por parada sin caché. Antes esa espera
+    # ocurría CON la base de datos bloqueada para escritura (BEGIN IMMEDIATE abierto desde el
+    # principio), lo que dejaba a cualquier otra escritura del sitio —hasta algo tan simple como
+    # registrar un intento de login— esperando y a veces fallando con "database is locked". Ahora
+    # el bloqueo se abre lo más tarde posible, justo antes de las escrituras propiamente dichas,
+    # que sí son rápidas.
     filas = db.execute(
         "SELECT id, estado, lat, lon, cliente_id, direccion FROM solicitudes "
         f"WHERE id IN ({marcadores}) AND estado IN ('pendiente', 'pendiente_entrega') "
@@ -4213,7 +4215,6 @@ def admin_crear_ruta_sugerida(user):
         tuple(ids),
     ).fetchall()
     if len(filas) < len(ids):
-        db.rollback()
         flash("Alguno de los pacientes ya no está disponible (se programó o cambió). Vuelve a armar la ruta sugerida.", "error")
         return redirect(url_for("admin_ruta_sugerida"))
     grupo = ordenar_por_cercania(fusionar_puntos_mismo_cliente(filas))
@@ -4221,8 +4222,23 @@ def admin_crear_ruta_sugerida(user):
     if estimado and estimado["minutos"] > _tope_efectivo_grupo(
         grupo, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN
     ):
-        db.rollback()
         flash("La ruta ya no cabe en el tiempo máximo. Vuelve a armar la ruta sugerida.", "error")
+        return redirect(url_for("admin_ruta_sugerida"))
+
+    try:
+        db.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        flash("Ya se está generando otra ruta en este momento. Revisa el panel antes de reintentar.", "error")
+        return redirect(url_for("admin_dashboard", tab="rutas"))
+    # Revalida por si alguno de estos pacientes se programó en otra ruta mientras se calculaba esta.
+    filas_actuales = db.execute(
+        f"SELECT id FROM solicitudes WHERE id IN ({marcadores}) AND estado IN ('pendiente', 'pendiente_entrega') "
+        "AND lat IS NOT NULL AND lon IS NOT NULL",
+        tuple(ids),
+    ).fetchall()
+    if len(filas_actuales) < len(ids):
+        db.rollback()
+        flash("Alguno de los pacientes ya no está disponible (se programó o cambió). Vuelve a armar la ruta sugerida.", "error")
         return redirect(url_for("admin_ruta_sugerida"))
     km = estimado["distancia_km"] if estimado else 0
     nombre_ruta = f"Ruta {siguiente_numero_ruta(db):02d} ({km} km)"
