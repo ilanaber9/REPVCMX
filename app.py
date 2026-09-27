@@ -4132,6 +4132,7 @@ def admin_ruta_sugerida(user):
     db = get_db()
     recolectores = db.execute("SELECT * FROM users WHERE role = 'recolector' ORDER BY name").fetchall()
     paciente_id = request.args.get("paciente_id", type=int)
+    modo_manual = request.args.get("modo") == "manual" or paciente_id is not None
     sugerida = armar_ruta_sugerida(db, semilla_id=paciente_id)
     if sugerida and sugerida.get("error"):
         flash(
@@ -4177,6 +4178,7 @@ def admin_ruta_sugerida(user):
         puntos=[{"lat": u["lat"], "lon": u["lon"], "orden": i} for i, u in enumerate(sugerida["grupo"], 1)] if sugerida else [],
         geometria=sugerida["estimado"]["geometria"] if sugerida and sugerida["estimado"] else None,
         candidatos=candidatos, paciente_id=paciente_id, semilla_nombre=semilla_nombre,
+        modo_manual=modo_manual,
     )
 
 

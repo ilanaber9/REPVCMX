@@ -118,8 +118,9 @@
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <h1 style="margin:0;">Rutas pendientes</h1>
-      <div style="display:flex; gap:8px;">
-        <a class="btn secondary small" href="{{ url_for('admin_ruta_sugerida') }}">Programar ruta</a>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <a class="btn secondary small" href="{{ url_for('admin_ruta_sugerida') }}">Ruta recomendada</a>
+        <a class="btn secondary small" href="{{ url_for('admin_ruta_sugerida', modo='manual') }}">Armar ruta manual</a>
         <a class="btn secondary small" href="{{ url_for('admin_mapa') }}">Ver mapa completo</a>
       </div>
     </div>
@@ -132,7 +133,7 @@
     {{ ruta_card(r) }}
     {% endfor %}
     {% else %}
-    <p class="empty">No hay rutas pendientes — créalas desde "Programar ruta".</p>
+    <p class="empty">No hay rutas pendientes — créalas desde "Ruta recomendada" o "Armar ruta manual".</p>
     {% endif %}
   </div>
 
@@ -153,7 +154,7 @@
   <div class="card">
     <h1 style="margin:0;">Solicitudes pendientes</h1>
     <p style="color:var(--muted); font-size:0.85rem;">
-      Para programarlas en una ruta, ve a "Programación de ruta" → "Programar ruta" → "Armar ruta sugerida".
+      Para programarlas en una ruta, ve a "Programación de ruta" → "Ruta recomendada" (o "Armar ruta manual" para elegir tú a quién agrupar).
     </p>
 
     <h2 style="margin-top:20px;">Solicitudes de clientes</h2>
@@ -234,7 +235,7 @@
     <p style="color:var(--muted); font-size:0.85rem; margin-top:14px;">
       Hay <strong>{{ pacientes_prueba|length }}</strong> paciente(s) de prueba activos ahora mismo. No
       aparecen en "Pacientes" (esa pestaña es solo para cuentas reales) — para usarlos, ve a
-      "Programación de ruta" → "Programar ruta" → "Armar ruta sugerida", que los toma en cuenta
+      "Programación de ruta" → "Ruta recomendada" (o "Armar ruta manual"), que los toma en cuenta
       igual que a los pacientes reales.
     </p>
     <div class="table-scroll" style="margin-top:10px; max-height:320px; overflow-y:auto;">

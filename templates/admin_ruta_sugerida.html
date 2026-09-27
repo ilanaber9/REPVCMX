@@ -9,14 +9,14 @@
   <a href="{{ url_for('admin_dashboard', tab='rutas') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
   <h1>Ruta sugerida</h1>
 
-  <details style="margin:10px 0;"{% if paciente_id %} open{% endif %}>
+  <details style="margin:10px 0;"{% if modo_manual %} open{% endif %}>
     <summary style="cursor:pointer; color:var(--muted); font-size:0.9rem;">
       ¿Prefieres armar la ruta a mano, alrededor de un paciente en particular?
     </summary>
     <form method="get" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
       <div>
         <label for="campo-paciente">Paciente</label>
-        <select name="paciente_id" id="campo-paciente" style="max-width:340px;">
+        <select name="paciente_id" id="campo-paciente" style="max-width:340px;"{% if modo_manual and not paciente_id %} autofocus{% endif %}>
           <option value="">Elige un paciente…</option>
           {% for cand in candidatos %}
           <option value="{{ cand['id'] }}" {% if paciente_id == cand['id'] %}selected{% endif %}>
