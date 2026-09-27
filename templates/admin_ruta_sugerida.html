@@ -9,14 +9,12 @@
   <a href="{{ url_for('admin_dashboard', tab='rutas') }}" style="font-size:0.85rem;">&larr; Volver al panel</a>
   <h1>Ruta sugerida</h1>
 
-  <details style="margin:10px 0;"{% if modo_manual %} open{% endif %}>
-    <summary style="cursor:pointer; color:var(--muted); font-size:0.9rem;">
-      ¿Prefieres armar la ruta a mano, alrededor de un paciente en particular?
-    </summary>
-    <div style="margin-top:10px;">
+  {% if modo_manual %}
+  <div style="margin:10px 0;">
+    <div>
       <label for="buscar-paciente">Buscar (por apellido, nombre o dirección)</label><br>
       <input type="text" id="buscar-paciente" placeholder="Escribe para buscar…" style="max-width:340px;"
-             {% if modo_manual and not paciente_id %}autofocus{% endif %}>
+             {% if not paciente_id %}autofocus{% endif %}>
     </div>
     <form method="get" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
       <div>
@@ -31,11 +29,8 @@
         </select>
       </div>
       <button type="submit">Armar ruta alrededor de él</button>
-      {% if paciente_id %}
-      <a class="btn secondary" href="{{ url_for('admin_ruta_sugerida') }}">Volver a la sugerencia automática</a>
-      {% endif %}
     </form>
-  </details>
+  </div>
   <script>
   (function () {
     var buscar = document.getElementById('buscar-paciente');
@@ -51,6 +46,7 @@
     });
   })();
   </script>
+  {% endif %}
 
   {% if not sugerida %}
   <p class="empty">No hay pacientes listos para programar por ahora.</p>
