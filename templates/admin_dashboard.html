@@ -119,7 +119,7 @@
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
       <h1 style="margin:0;">Rutas pendientes</h1>
       <div style="display:flex; gap:8px;">
-        <a class="btn secondary small" href="{{ url_for('admin_rutas_masivas') }}">Programar ruta</a>
+        <a class="btn secondary small" href="{{ url_for('admin_ruta_sugerida') }}">Programar ruta</a>
         <a class="btn secondary small" href="{{ url_for('admin_mapa') }}">Ver mapa completo</a>
       </div>
     </div>
@@ -153,7 +153,7 @@
   <div class="card">
     <h1 style="margin:0;">Solicitudes pendientes</h1>
     <p style="color:var(--muted); font-size:0.85rem;">
-      Para programarlas en una ruta, ve a "Programación de ruta" → "Programar ruta".
+      Para programarlas en una ruta, ve a "Programación de ruta" → "Programar ruta" → "Armar ruta sugerida".
     </p>
 
     <h2 style="margin-top:20px;">Solicitudes de clientes</h2>
@@ -234,8 +234,8 @@
     <p style="color:var(--muted); font-size:0.85rem; margin-top:14px;">
       Hay <strong>{{ pacientes_prueba|length }}</strong> paciente(s) de prueba activos ahora mismo. No
       aparecen en "Pacientes" (esa pestaña es solo para cuentas reales) — para usarlos, ve a
-      "Programación de ruta" → "Programar ruta", ahí sí aparecen agrupados por zona listos para
-      programar una ruta con ellos, igual que con pacientes reales.
+      "Programación de ruta" → "Programar ruta" → "Armar ruta sugerida", que los toma en cuenta
+      igual que a los pacientes reales.
     </p>
     <div class="table-scroll" style="margin-top:10px; max-height:320px; overflow-y:auto;">
     <table style="min-width:auto;">
@@ -259,49 +259,25 @@
   {% endif %}
 
   <div class="card">
-    <h1 style="margin:0;">Sin zona asignada</h1>
-    <p style="color:var(--muted); font-size:0.9rem;">
-      Estos pacientes tienen una solicitud pendiente pero no tienen zona — <strong>nunca van a aparecer
-      al crear rutas por zona</strong> hasta que se les asigne una.
-    </p>
-    {% if auditoria_sin_zona %}
-    <table>
-      <tr><th>Paciente</th><th>Dirección</th><th>Material</th><th>Estado</th></tr>
-      {% for s in auditoria_sin_zona %}
-      <tr>
-        <td>{{ s['nombre'] }}</td>
-        <td>{{ s['direccion'] }}</td>
-        <td>{{ s['material'] if s['material'] != 'PVC' else '—' }}</td>
-        <td><span class="badge {{ s['estado'] }}">{{ ESTADO_LABELS.get(s['estado'], s['estado']) }}</span></td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-    <p class="empty">Ninguno — todos los pendientes tienen zona asignada.</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
     <h1 style="margin:0;">Sin coordenadas</h1>
     <p style="color:var(--muted); font-size:0.9rem;">
-      Estos pacientes sí tienen zona y sí entran a la ruta, pero al no tener ubicación (lat/lon) no
-      se pueden ordenar por cercanía ni aparecen en el mapa — pueden quedar en cualquier punto del
-      recorrido, ineficientemente.
+      Estos pacientes tienen una solicitud pendiente pero, al no tener ubicación (lat/lon), nunca
+      van a aparecer en "Armar ruta sugerida" ni en el mapa — se quedan esperando en silencio hasta
+      que se les corrija la dirección.
     </p>
     {% if auditoria_sin_coordenadas %}
     <table>
-      <tr><th>Paciente</th><th>Dirección</th><th>Zona</th><th>Estado</th></tr>
+      <tr><th>Paciente</th><th>Dirección</th><th>Estado</th></tr>
       {% for s in auditoria_sin_coordenadas %}
       <tr>
         <td>{{ s['nombre'] }}</td>
         <td>{{ s['direccion'] }}</td>
-        <td>{{ s['zona'] }}</td>
         <td><span class="badge {{ s['estado'] }}">{{ ESTADO_LABELS.get(s['estado'], s['estado']) }}</span></td>
       </tr>
       {% endfor %}
     </table>
     {% else %}
-    <p class="empty">Ninguno — todos los pendientes con zona tienen coordenadas.</p>
+    <p class="empty">Ninguno — todos los pendientes tienen coordenadas.</p>
     {% endif %}
   </div>
 
