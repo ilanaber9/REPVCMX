@@ -55,11 +55,6 @@
   {% if not sugerida %}
   <p class="empty">No hay pacientes listos para programar por ahora.</p>
   {% else %}
-  <p style="color:var(--muted); font-size:0.9rem; margin-top:0;">
-    Parte del paciente que más lleva esperando y suma a los más cercanos, hasta llenar la ruta sin pasar del tiempo máximo.
-    Revísala antes de programarla: al confirmar, a cada paciente le llega un WhatsApp con su día y horario aproximado.
-  </p>
-
   <p>
     <strong>{{ filas|length }} paradas</strong>
     {% if sugerida.estimado %}· tiempo estimado ida y vuelta: <strong>{{ sugerida.estimado.duracion }}</strong> ({{ sugerida.estimado.distancia_km }} km){% endif %}
