@@ -13,10 +13,15 @@
     <summary style="cursor:pointer; color:var(--muted); font-size:0.9rem;">
       ¿Prefieres armar la ruta a mano, alrededor de un paciente en particular?
     </summary>
+    <div style="margin-top:10px;">
+      <label for="buscar-paciente">Buscar (por apellido, nombre o dirección)</label><br>
+      <input type="text" id="buscar-paciente" placeholder="Escribe para buscar…" style="max-width:340px;"
+             {% if modo_manual and not paciente_id %}autofocus{% endif %}>
+    </div>
     <form method="get" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
       <div>
-        <label for="campo-paciente">Paciente</label>
-        <select name="paciente_id" id="campo-paciente" style="max-width:340px;"{% if modo_manual and not paciente_id %} autofocus{% endif %}>
+        <label for="campo-paciente">Paciente (ordenados por apellido)</label>
+        <select name="paciente_id" id="campo-paciente" size="8" style="max-width:340px;">
           <option value="">Elige un paciente…</option>
           {% for cand in candidatos %}
           <option value="{{ cand['id'] }}" {% if paciente_id == cand['id'] %}selected{% endif %}>
@@ -31,6 +36,21 @@
       {% endif %}
     </form>
   </details>
+  <script>
+  (function () {
+    var buscar = document.getElementById('buscar-paciente');
+    var select = document.getElementById('campo-paciente');
+    if (!buscar || !select) return;
+    buscar.addEventListener('keydown', function (e) { if (e.key === 'Enter') e.preventDefault(); });
+    buscar.addEventListener('input', function () {
+      var q = buscar.value.trim().toLowerCase();
+      Array.prototype.forEach.call(select.options, function (opt) {
+        if (!opt.value) return;
+        opt.hidden = q !== '' && opt.textContent.toLowerCase().indexOf(q) === -1;
+      });
+    });
+  })();
+  </script>
 
   {% if not sugerida %}
   <p class="empty">No hay pacientes listos para programar por ahora.</p>

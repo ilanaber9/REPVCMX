@@ -4142,14 +4142,20 @@ def admin_ruta_sugerida(user):
         paciente_id = None
         sugerida = armar_ruta_sugerida(db)
     # Para el selector "armar alrededor de este paciente": los mismos pendientes que puede tomar
-    # armar_ruta_sugerida como semilla (con ubicación y ya listos para recolectarse).
+    # armar_ruta_sugerida como semilla (con ubicación y ya listos para recolectarse). Se ordenan por
+    # apellido (la última palabra del nombre) para que sea más fácil ubicar a alguien, ya que el
+    # nombre se guarda como texto libre y no hay un campo de apellido por separado.
     candidatos = db.execute(
         "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, "
         f"CAST(julianday('now', 'localtime') - julianday({_listo_desde_sql('s')}) AS INTEGER) AS dias_espera "
         "FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
         "WHERE s.estado IN ('pendiente', 'pendiente_entrega') AND s.lat IS NOT NULL AND s.lon IS NOT NULL "
-        f"AND {condicion_lista_para_recoleccion('s')} ORDER BY nombre"
+        f"AND {condicion_lista_para_recoleccion('s')}"
     ).fetchall()
+    candidatos = sorted(
+        candidatos,
+        key=lambda c: ((c["nombre"] or "").split()[-1].lower() if (c["nombre"] or "").split() else "", (c["nombre"] or "").lower()),
+    )
     filas = []
     if sugerida:
         for i, u in enumerate(sugerida["grupo"], start=1):
