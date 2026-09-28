@@ -46,11 +46,17 @@
     padding: 16px 32px; border-radius: 999px; margin-top: 26px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
   }
   .inicio-hero .btn-participar:hover { background: #eef6f1; }
+  .inicio-hero .btn.secondary {
+    background: transparent; color: white; border: 1px solid rgba(255, 255, 255, 0.6);
+    font-weight: 600; font-size: 1.02rem; padding: 16px 28px; border-radius: 999px;
+  }
+  .inicio-hero .btn.secondary:hover { background: rgba(255, 255, 255, 0.12); }
   .inicio-hero .ya-soy { display: block; margin-top: 14px; font-size: 0.9rem; color: white; opacity: 0.9; }
   .inicio-hero .foto-kit {
     width: auto; max-width: 100%; height: auto; max-height: 380px; display: block;
-    margin: 28px auto 0; border-radius: 14px; border: 3px solid rgba(255, 255, 255, 0.5);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+    margin: 28px auto 0;
+    -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
   }
 
   .banda-stats .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; text-align: center; max-width: 640px; }
@@ -135,8 +141,8 @@
     .inicio-impacto > div { display: grid; grid-template-columns: 52px 1fr; text-align: left; align-items: center; column-gap: 14px; }
     .inicio-impacto .icono { grid-row: span 4; }
     .inicio-impacto .cifra { margin-top: 0; }
-    .inicio-hero .btn-participar, .inicio-cierre .btn { display: block; width: 100%; }
-    .inicio-cierre div[style] { flex-direction: column; }
+    .inicio-hero .btn-participar, .inicio-hero .btn.secondary, .inicio-cierre .btn { display: block; width: 100%; }
+    .inicio-cierre div[style], .botones-hero { flex-direction: column; }
   }
 </style>
 {% endblock %}
@@ -149,7 +155,10 @@
     <p class="oferta">Nosotros pasamos a tu casa a recogerlas, <strong>sin costo para ti</strong>, y las convertimos en nuevos productos.</p>
     <img class="foto-kit" src="{{ url_for('static', filename='img/kit-dialisis.jpg') }}"
          alt="Bolsas y tubos de diálisis peritoneal listos para reciclarse">
-    <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
+    <div class="botones-hero" style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:26px;">
+      <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}" style="margin-top:0;">Quiero participar</a>
+      <button type="button" class="btn secondary btn-invitar-compartir" style="margin-top:0;">📤 Invitar a alguien</button>
+    </div>
     <a class="ya-soy" href="#tutorial" style="margin-top:10px;">▶ Ver cómo funciona (video de 3 minutos)</a>
     <a class="ya-soy" href="{{ url_for('login', tipo='cliente') }}">Ya soy parte del programa — iniciar sesión</a>
   </div>
@@ -296,7 +305,7 @@
     <p>Inscribirte toma unos minutos desde tu celular.</p>
     <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:8px;">
       <a class="btn" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
-      <button type="button" class="btn secondary" id="btn-invitar">📤 Invitar a alguien</button>
+      <button type="button" class="btn secondary btn-invitar-compartir">📤 Invitar a alguien</button>
     </div>
   </div>
 </section>
@@ -394,15 +403,17 @@ document.getElementById('btn-repvc').addEventListener('click', () => {
   if (paso.style.display === 'block') paso.scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 
-document.getElementById('btn-invitar').addEventListener('click', () => {
-  const texto = '¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden reciclar? '
-    + 'RE-PVC pasa a tu casa por ellas, sin costo. Entérate aquí:';
-  const url = location.origin + '{{ url_for("home") }}';
-  if (navigator.share) {
-    navigator.share({ title: 'RE-PVC', text: texto, url: url }).catch(() => {});
-  } else {
-    window.open('https://api.whatsapp.com/send?text=' + encodeURIComponent(texto + ' ' + url), '_blank');
-  }
+document.querySelectorAll('.btn-invitar-compartir').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const texto = '¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden reciclar? '
+      + 'RE-PVC pasa a tu casa por ellas, sin costo. Entérate aquí:';
+    const url = location.origin + '{{ url_for("home") }}';
+    if (navigator.share) {
+      navigator.share({ title: 'RE-PVC', text: texto, url: url }).catch(() => {});
+    } else {
+      window.open('https://api.whatsapp.com/send?text=' + encodeURIComponent(texto + ' ' + url), '_blank');
+    }
+  });
 });
 </script>
 {% endblock %}
