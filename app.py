@@ -178,6 +178,9 @@ ACTIVIDADES_PRODUCTIVIDAD_LABELS = {
 DIAS_ESPERA_DONACION = 30  # pacientes en modalidad 'donacion': cada cuántos días se vuelven a
 # programar después de su última recolección (o de entregado el bote, si es la primera).
 DIAS_ESPERA_COMPRA = 60  # pacientes en modalidad 'compra': ídem, pero cada 60 días.
+DIAS_ESPERA_PRIMERA_RECOLECCION = 30  # a un paciente nuevo (nunca recolectado) hay que darle este
+# mínimo de días desde que se dio de alta antes de tomarlo en cuenta para una ruta: recién
+# inscrito seguramente todavía no ha juntado material suficiente.
 DIAS_VACACIONES_DEFAULT = 12
 PASSWORD_MIN_LENGTH = 8
 MINUTOS_VIGENCIA_CODIGO = 15  # los pacientes solo tienen WhatsApp (no correo), y WhatsApp exige
@@ -1261,14 +1264,18 @@ def geocodificar_inverso(lat, lon):
 
 def condicion_lista_para_recoleccion(alias=""):
     """Fragmento SQL (booleano) que indica si una solicitud ya está lista para volver a
-    programarse: nunca se ha recolectado (fecha_reinicio_espera NULL, incluye pacientes nuevos
-    en su primera recolección) o ya pasó el intervalo que le toca según su modalidad —30 días
-    si es donación, 60 si es compra— contado desde su última recolección."""
+    programarse: si nunca se ha recolectado (fecha_reinicio_espera NULL, paciente nuevo), ya deben
+    haber pasado DIAS_ESPERA_PRIMERA_RECOLECCION días desde que se dio de alta (si no, seguramente
+    no ha juntado material todavía); si ya se recolectó antes, ya debe haber pasado el intervalo
+    que le toca según su modalidad —30 días si es donación, 60 si es compra— contado desde esa
+    última recolección."""
     p = f"{alias}." if alias else ""
     dias_caso = f"CASE WHEN {p}modalidad = 'compra' THEN {DIAS_ESPERA_COMPRA} ELSE {DIAS_ESPERA_DONACION} END"
     return (
-        f"({p}fecha_reinicio_espera IS NULL OR "
-        f"datetime({p}fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') <= datetime('now', 'localtime'))"
+        f"(({p}fecha_reinicio_espera IS NULL AND "
+        f"datetime({p}created_at, '+{DIAS_ESPERA_PRIMERA_RECOLECCION} days') <= datetime('now', 'localtime')) OR "
+        f"({p}fecha_reinicio_espera IS NOT NULL AND "
+        f"datetime({p}fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') <= datetime('now', 'localtime')))"
     )
 
 
