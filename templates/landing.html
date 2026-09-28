@@ -14,6 +14,23 @@
 {% set impacto_fuente = "" %}
 {% macro equiv(n) -%}{% if n < 10 %}{{ "{:,.1f}".format(n) }}{% else %}{{ "{:,.0f}".format(n) }}{% endif %}{%- endmacro %}
 {% block title %}RE-PVC — Del cuidado de la gente al cuidado del ambiente{% endblock %}
+{% block nav_extra %}
+<div class="nav-tabs">
+  <div class="nav-tabs-links" id="nav-tabs-links">
+    <a href="#quehacemos">Qué hacemos</a>
+    <a href="#cajas">Cajas</a>
+    <a href="#pasos">Cómo empezar</a>
+    <a href="#impacto">Nuestro impacto</a>
+    <a href="#tutorial">Video</a>
+    <a href="#colaboradores">Nuestros colaboradores</a>
+  </div>
+  <button type="button" class="nav-tabs-toggle" id="btn-nav-tabs" aria-label="Abrir menú de secciones" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+    </svg>
+  </button>
+</div>
+{% endblock %}
 {% block head %}
 <style>
   /* Esta página se sale del layout angosto y encajonado del resto del sitio (pensado para
@@ -22,20 +39,34 @@
      <style> solo se carga en landing.html, no afecta a ninguna otra pantalla. */
   main { max-width: none; margin: 0; padding: 0; }
 
-  .inicio-tabs {
-    position: sticky; top: 0; z-index: 20; background: white;
-    border-bottom: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  /* Menú de secciones integrado en el header (mismo renglón que el logo): en escritorio se ven
+     los links directo, como en vinyl.org.au; en celular se esconden detrás de un botón de 3
+     rayas que despliega un menú, porque no caben todos en el renglón. */
+  .nav-tabs { position: relative; display: flex; align-items: center; }
+  .nav-tabs-toggle {
+    display: none; background: none; border: none; color: white; padding: 6px; margin: 0;
+    cursor: pointer; min-height: 0;
   }
-  .inicio-tabs .wrap-ancho {
-    max-width: 1080px; margin: 0 auto; padding: 0 12px; display: flex; gap: 4px;
-    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  .nav-tabs-toggle:hover { background: none; }
+  .nav-tabs-toggle svg { width: 24px; height: 24px; display: block; }
+  .nav-tabs-links { display: flex; gap: 20px; align-items: center; }
+  .nav-tabs-links a {
+    color: white; opacity: 0.9; font-size: 0.9rem; font-weight: 600; text-decoration: none;
+    white-space: nowrap;
   }
-  .inicio-tabs a {
-    display: block; padding: 14px 16px; font-size: 0.92rem; font-weight: 600; color: var(--muted);
-    text-decoration: none; white-space: nowrap; border-bottom: 3px solid transparent;
+  .nav-tabs-links a:hover { opacity: 1; text-decoration: underline; }
+
+  @media (max-width: 780px) {
+    .nav-tabs-toggle { display: block; }
+    .nav-tabs-links {
+      display: none; position: absolute; top: 100%; right: 0; margin-top: 10px; min-width: 230px;
+      flex-direction: column; align-items: flex-start; gap: 2px; background: var(--green-dark);
+      border-radius: 10px; padding: 10px 0; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25); z-index: 100;
+    }
+    .nav-tabs-links.abierto { display: flex; }
+    .nav-tabs-links a { display: block; width: 100%; padding: 10px 18px; opacity: 1; }
+    .nav-tabs-links a:hover { background: rgba(255, 255, 255, 0.1); text-decoration: none; }
   }
-  .inicio-tabs a:hover { color: var(--green-dark); border-bottom-color: #d4e9dc; }
-  #quehacemos, #cajas, #pasos, #impacto, #tutorial { scroll-margin-top: 54px; }
 
   .banda { padding: 56px 0; }
   .banda .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
@@ -174,16 +205,6 @@
   </div>
 </section>
 
-<nav class="inicio-tabs">
-  <div class="wrap-ancho">
-    <a href="#quehacemos">Qué hacemos</a>
-    <a href="#cajas">Cajas</a>
-    <a href="#pasos">Cómo empezar</a>
-    <a href="#impacto">Nuestro impacto</a>
-    <a href="#tutorial">Video</a>
-  </div>
-</nav>
-
 <section class="banda banda-palida" id="quehacemos">
   <div class="wrap">
     <h2>¿Qué hacemos?</h2>
@@ -280,6 +301,13 @@
     <video controls preload="metadata" playsinline poster="{{ url_for('static', filename='videos/tutorial-repvc.jpg') }}">
       <source src="{{ url_for('static', filename='videos/tutorial-repvc.mp4') }}" type="video/mp4">
     </video>
+  </div>
+</section>
+
+<section class="banda banda-palida" id="colaboradores" style="text-align:center;">
+  <div class="wrap">
+    <h2>Nuestros colaboradores</h2>
+    <p class="empty" style="color:var(--muted);">Próximamente aquí las empresas y organizaciones que hacen posible este programa.</p>
   </div>
 </section>
 
@@ -380,6 +408,28 @@ document.getElementById('btn-verificar-cp').addEventListener('click', verificarC
 document.getElementById('cp-verificar').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') verificarCp();
 });
+
+const btnNavTabs = document.getElementById('btn-nav-tabs');
+const navTabsLinks = document.getElementById('nav-tabs-links');
+if (btnNavTabs && navTabsLinks) {
+  btnNavTabs.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const abierto = navTabsLinks.classList.toggle('abierto');
+    btnNavTabs.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+  });
+  navTabsLinks.querySelectorAll('a').forEach((a) => {
+    a.addEventListener('click', () => {
+      navTabsLinks.classList.remove('abierto');
+      btnNavTabs.setAttribute('aria-expanded', 'false');
+    });
+  });
+  document.addEventListener('click', (e) => {
+    if (!navTabsLinks.contains(e.target) && e.target !== btnNavTabs) {
+      navTabsLinks.classList.remove('abierto');
+      btnNavTabs.setAttribute('aria-expanded', 'false');
+    }
+  });
+}
 
 document.getElementById('btn-repvc').addEventListener('click', () => {
   const paso = document.getElementById('paso-repvc');

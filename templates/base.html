@@ -17,6 +17,7 @@
         <span>{{ current_user['name'] }} · {{ current_user['role'] }}</span>
         <a href="{{ url_for('logout') }}">Salir</a>
       {% endif %}
+      {% block nav_extra %}{% endblock %}
     </div>
   </header>
   <main>
