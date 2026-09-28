@@ -22,6 +22,21 @@
      <style> solo se carga en landing.html, no afecta a ninguna otra pantalla. */
   main { max-width: none; margin: 0; padding: 0; }
 
+  .inicio-tabs {
+    position: sticky; top: 0; z-index: 20; background: white;
+    border-bottom: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+  .inicio-tabs .wrap-ancho {
+    max-width: 1080px; margin: 0 auto; padding: 0 12px; display: flex; gap: 4px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  .inicio-tabs a {
+    display: block; padding: 14px 16px; font-size: 0.92rem; font-weight: 600; color: var(--muted);
+    text-decoration: none; white-space: nowrap; border-bottom: 3px solid transparent;
+  }
+  .inicio-tabs a:hover { color: var(--green-dark); border-bottom-color: #d4e9dc; }
+  #quehacemos, #cajas, #pasos, #impacto, #tutorial { scroll-margin-top: 54px; }
+
   .banda { padding: 56px 0; }
   .banda .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
   .banda .wrap-ancho { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
@@ -34,7 +49,11 @@
   .resalta { color: var(--green-dark); }
   .banda-oscura .resalta, .inicio-hero .resalta { color: #baf2cf; }
 
-  .inicio-hero { padding: 64px 0 56px; text-align: center; }
+  .inicio-hero { padding: 64px 0 56px; text-align: center; position: relative; }
+  .hero-social { position: absolute; top: 16px; right: 20px; display: flex; gap: 14px; }
+  .hero-social a { color: white; opacity: 0.85; display: flex; }
+  .hero-social a:hover { opacity: 1; }
+  .hero-social svg { width: 22px; height: 22px; }
   .inicio-hero .lema { text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; opacity: 0.85; margin: 0 0 14px; font-weight: 600; }
   .inicio-hero h1.pregunta { font-size: 2.75rem; font-weight: 800; letter-spacing: -0.01em; line-height: 1.12; margin: 8px auto 18px; max-width: 700px; }
   .inicio-hero .dato { font-size: 1.3rem; }
@@ -133,6 +152,14 @@
 {% endblock %}
 {% block content %}
 <section class="inicio-hero banda-oscura">
+  <div class="hero-social">
+    <a href="https://www.instagram.com/repvcmx" target="_blank" rel="noopener" aria-label="RE-PVC en Instagram">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c-2.72 0-3.06.01-4.12.06-1.06.05-1.79.22-2.43.47-.66.26-1.22.6-1.77 1.15-.55.55-.89 1.11-1.15 1.77-.25.64-.42 1.37-.47 2.43C2.01 8.94 2 9.28 2 12s.01 3.06.06 4.12c.05 1.06.22 1.79.47 2.43.26.66.6 1.22 1.15 1.77.55.55 1.11.89 1.77 1.15.64.25 1.37.42 2.43.47C8.94 21.99 9.28 22 12 22s3.06-.01 4.12-.06c1.06-.05 1.79-.22 2.43-.47.66-.26 1.22-.6 1.77-1.15.55-.55.89-1.11 1.15-1.77.25-.64.42-1.37.47-2.43.05-1.06.06-1.4.06-4.12s-.01-3.06-.06-4.12c-.05-1.06-.22-1.79-.47-2.43-.26-.66-.6-1.22-1.15-1.77-.55-.55-1.11-.89-1.77-1.15-.64-.25-1.37-.42-2.43-.47C15.06 2.01 14.72 2 12 2zm0 1.8c2.67 0 2.99.01 4.04.06.98.04 1.5.21 1.86.35.47.18.8.4 1.15.75.35.35.57.68.75 1.15.14.36.31.88.35 1.86.05 1.05.06 1.37.06 4.04s-.01 2.99-.06 4.04c-.04.98-.21 1.5-.35 1.86-.18.47-.4.8-.75 1.15-.35.35-.68.57-1.15.75-.36.14-.88.31-1.86.35-1.05.05-1.37.06-4.04.06s-2.99-.01-4.04-.06c-.98-.04-1.5-.21-1.86-.35-.47-.18-.8-.4-1.15-.75-.35-.35-.57-.68-.75-1.15-.14-.36-.31-.88-.35-1.86C3.81 14.99 3.8 14.67 3.8 12s.01-2.99.06-4.04c.04-.98.21-1.5.35-1.86.18-.47.4-.8.75-1.15.35-.35.68-.57 1.15-.75.36-.14.88-.31 1.86-.35C9.01 3.81 9.33 3.8 12 3.8zm0 3.05a5.15 5.15 0 1 0 0 10.3 5.15 5.15 0 0 0 0-10.3zm0 8.5a3.35 3.35 0 1 1 0-6.7 3.35 3.35 0 0 1 0 6.7zm5.36-8.7a1.2 1.2 0 1 1-2.4 0 1.2 1.2 0 0 1 2.4 0z"/></svg>
+    </a>
+    <a href="https://www.tiktok.com/@repvcmx" target="_blank" rel="noopener" aria-label="RE-PVC en TikTok">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.6 2h-3.2v13.4a2.8 2.8 0 1 1-2-2.68V9.4a6 6 0 1 0 5.2 5.95V8.9a7.6 7.6 0 0 0 4.4 1.4V7.1a4.4 4.4 0 0 1-4.4-4.4V2z"/></svg>
+    </a>
+  </div>
   <div class="wrap">
     <p class="lema">Del cuidado de la gente al cuidado del ambiente</p>
     <h1 class="pregunta">¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden <span class="resalta">reciclar</span>?</h1>
@@ -147,7 +174,17 @@
   </div>
 </section>
 
-<section class="banda banda-palida">
+<nav class="inicio-tabs">
+  <div class="wrap-ancho">
+    <a href="#quehacemos">Qué hacemos</a>
+    <a href="#cajas">Cajas</a>
+    <a href="#pasos">Cómo empezar</a>
+    <a href="#impacto">Nuestro impacto</a>
+    <a href="#tutorial">Video</a>
+  </div>
+</nav>
+
+<section class="banda banda-palida" id="quehacemos">
   <div class="wrap">
     <h2>¿Qué hacemos?</h2>
     <p class="empatia">Sabemos lo mucho que te exige tu tratamiento. Por eso <strong>nos encargamos nosotros</strong>: tú solo juntas tus bolsas y nosotros pasamos por ellas.</p>
@@ -160,7 +197,7 @@
   </div>
 </section>
 
-<section class="banda banda-blanca cuadro-redistribucion-seccion">
+<section class="banda banda-blanca cuadro-redistribucion-seccion" id="cajas">
   <div class="wrap-ancho cuadro-redistribucion">
     <img class="foto-cajas" src="{{ url_for('static', filename='cajas-redistribucion.webp') }}"
          alt="Cajas de tratamiento de diálisis peritoneal apiladas, listas para redistribuirse" width="900" height="698">
@@ -181,7 +218,7 @@
   </div>
 </section>
 
-<section class="banda banda-palida plan">
+<section class="banda banda-palida plan" id="pasos">
   <div class="wrap">
     <h2 style="text-align:center;">Empezar es muy sencillo: 3 pasos</h2>
     <ol class="inicio-pasos">
@@ -205,7 +242,7 @@
   </div>
 </section>
 
-<section class="banda banda-blanca">
+<section class="banda banda-blanca" id="impacto">
   <div class="wrap">
     <h2 style="text-align:center;">Nuestro impacto en el medio ambiente</h2>
     <p style="text-align:center; color:var(--muted);">Ahorramos el equivalente a:</p>
