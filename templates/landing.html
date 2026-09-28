@@ -7,10 +7,10 @@
    "divisor": 3468, "equiv_unidad": "casas en 1 año", "equiv_frase": "Equivale a la electricidad de"},
   {"icono": "💧", "titulo": "Agua ahorrada", "factor": 13, "unidad": "L", "detalle": "en total",
    "divisor": 1100, "equiv_unidad": "tinacos", "equiv_frase": "Equivale a llenar"},
-  {"icono": "🌎", "titulo": "Emisiones de CO₂ evitadas", "factor": 5, "unidad": "kg", "detalle": "en total",
-   "divisor": 21, "equiv_unidad": "árboles en 1 año", "equiv_frase": "Equivale a lo que absorben"},
+  {"icono": "🚗", "titulo": "Emisiones de CO₂ evitadas", "factor": 5, "unidad": "kg", "detalle": "en total",
+   "divisor": 0.12, "equiv_unidad": "km sin manejar en coche", "equiv_frase": "Equivale a no manejar"},
 ] %}
-{# divisor: cuánto equivale a "1" de la comparación: 289 kWh/mes × 12 = 3,468 kWh al año por casa; un tinaco típico es de 1,100 L; 21 kg de CO₂/año por árbol. #}
+{# divisor: cuánto equivale a "1" de la comparación: 289 kWh/mes × 12 = 3,468 kWh al año por casa; un tinaco típico es de 1,100 L; un coche promedio emite unos 0.12 kg de CO₂ por km. #}
 {% set impacto_fuente = "" %}
 {% macro equiv(n) -%}{% if n < 10 %}{{ "{:,.1f}".format(n) }}{% else %}{{ "{:,.0f}".format(n) }}{% endif %}{%- endmacro %}
 {% block title %}RE-PVC — Del cuidado de la gente al cuidado del ambiente{% endblock %}
