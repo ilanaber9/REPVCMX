@@ -52,11 +52,12 @@
   }
   .inicio-hero .btn.secondary:hover { background: rgba(255, 255, 255, 0.12); }
   .inicio-hero .ya-soy { display: block; margin-top: 14px; font-size: 0.9rem; color: white; opacity: 0.9; }
-  .inicio-hero .foto-kit {
-    width: auto; max-width: 100%; height: auto; max-height: 380px; display: block;
-    margin: 28px auto 0;
-    -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
-    mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
+  .inicio-hero.banda-oscura {
+    background-image:
+      linear-gradient(180deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.55) 100%),
+      url("{{ url_for('static', filename='img/kit-dialisis.jpg') }}");
+    background-size: cover;
+    background-position: center;
   }
 
   .banda-stats .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; text-align: center; max-width: 640px; }
@@ -153,8 +154,6 @@
     <h1 class="pregunta">¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden <span class="resalta">reciclar</span>?</h1>
     <p class="dato">Un paciente puede producir hasta <strong>100 kg</strong> de este material al año.</p>
     <p class="oferta">Nosotros pasamos a tu casa a recogerlas, <strong>sin costo para ti</strong>, y las convertimos en nuevos productos.</p>
-    <img class="foto-kit" src="{{ url_for('static', filename='img/kit-dialisis.jpg') }}"
-         alt="Bolsas y tubos de diálisis peritoneal listos para reciclarse">
     <div class="botones-hero" style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:26px;">
       <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}" style="margin-top:0;">Quiero participar</a>
       <button type="button" class="btn secondary btn-invitar-compartir" style="margin-top:0;">📤 Invitar a alguien</button>
