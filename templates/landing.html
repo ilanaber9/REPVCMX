@@ -32,6 +32,14 @@
   }
   .inicio-hero .btn-participar:hover { background: #eef6f1; }
   .inicio-hero .ya-soy { display: block; margin-top: 14px; font-size: 0.9rem; color: white; opacity: 0.9; }
+  .inicio-hero .foto-kit {
+    width: 100%; max-width: 480px; height: 260px; object-fit: cover; display: block;
+    margin: 24px auto 0; border-radius: 12px; border: 3px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  }
+  .inicio-hero .foto-caption {
+    font-size: 0.82rem; opacity: 0.85; margin: 8px auto 0; max-width: 480px;
+  }
 
   .kg-contador {
     text-align: center; background: #f1f8f4; border: 2px solid var(--green); border-radius: 14px;
@@ -117,6 +125,9 @@
   <h1 class="pregunta">¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden reciclar?</h1>
   <p class="dato">Un paciente puede producir hasta <strong>100 kg</strong> de este material al año.</p>
   <p class="oferta">Nosotros pasamos a tu casa a recogerlas, <strong>sin costo para ti</strong>, y las convertimos en nuevos productos.</p>
+  <img class="foto-kit" src="{{ url_for('static', filename='img/kit-dialisis.jpg') }}"
+       alt="Bolsas y tubos de diálisis peritoneal listos para reciclarse">
+  <p class="foto-caption">Así se ven las bolsas y tubos que recolectamos — todo esto se puede reciclar.</p>
   <a class="btn btn-participar" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
   <a class="ya-soy" href="#tutorial" style="margin-top:10px;">▶ Ver cómo funciona (video de 3 minutos)</a>
   <a class="ya-soy" href="{{ url_for('login', tipo='cliente') }}">Ya soy parte del programa — iniciar sesión</a>
