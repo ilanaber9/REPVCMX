@@ -244,7 +244,10 @@
 <section class="card inicio-cierre">
   <h2 style="margin-bottom:6px;">Únete a los {{ "{:,}".format(pacientes_participantes) }} pacientes que ya participan</h2>
   <p style="color:var(--muted); margin-top:0;">Inscribirte toma unos minutos desde tu celular.</p>
-  <a class="btn" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
+  <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+    <a class="btn" href="{{ url_for('paciente_intro') }}">Quiero participar</a>
+    <button type="button" class="btn secondary" id="btn-invitar">📤 Invitar a alguien</button>
+  </div>
 </section>
 
 <div class="inicio-acceso">
@@ -338,6 +341,17 @@ document.getElementById('btn-repvc').addEventListener('click', () => {
   const paso = document.getElementById('paso-repvc');
   paso.style.display = paso.style.display === 'none' ? 'block' : 'none';
   if (paso.style.display === 'block') paso.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
+document.getElementById('btn-invitar').addEventListener('click', () => {
+  const texto = '¿Sabías que las bolsas del tratamiento de diálisis peritoneal se pueden reciclar? '
+    + 'RE-PVC pasa a tu casa por ellas, sin costo. Entérate aquí:';
+  const url = location.origin + '{{ url_for("home") }}';
+  if (navigator.share) {
+    navigator.share({ title: 'RE-PVC', text: texto, url: url }).catch(() => {});
+  } else {
+    window.open('https://api.whatsapp.com/send?text=' + encodeURIComponent(texto + ' ' + url), '_blank');
+  }
 });
 </script>
 {% endblock %}
