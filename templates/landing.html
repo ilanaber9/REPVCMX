@@ -102,6 +102,8 @@
   }
   .inicio-hero .btn.secondary:hover { background: rgba(255, 255, 255, 0.12); }
   .inicio-hero .ya-soy { display: block; margin-top: 14px; font-size: 0.9rem; color: white; opacity: 0.9; }
+  /* Más chico que "Quiero participar" a propósito, para que no le compita en protagonismo. */
+  .btn-invitar-compartir.btn.secondary { font-size: 0.82rem; padding: 9px 18px; font-weight: 600; }
   .inicio-hero.banda-oscura {
     background-image:
       linear-gradient(180deg, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.55) 100%),
@@ -178,6 +180,8 @@
     .inicio-impacto .cifra { margin-top: 0; }
     .inicio-hero .btn-participar, .inicio-hero .btn.secondary, .inicio-cierre .btn { display: block; width: 100%; }
     .inicio-cierre div[style], .botones-hero { flex-direction: column; }
+    /* El de invitar se queda chico y centrado, no de ancho completo como los demás. */
+    .btn-invitar-compartir.btn.secondary { display: inline-block; width: auto; align-self: center; }
   }
 </style>
 {% endblock %}
