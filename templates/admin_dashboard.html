@@ -672,7 +672,7 @@
       <tr>
         <td>{{ s['cliente_nombre'] }}</td>
         <td>{{ s['direccion'] }}</td>
-        <td>{{ s['telefono'] or '—' }}</td>
+        <td>{{ s['telefono_contacto'] or '—' }}</td>
         <td>{{ s['created_at']|cdmx }}</td>
       </tr>
       {% endfor %}
@@ -697,7 +697,7 @@
       <tr>
         <td>{{ s['cliente_nombre'] }}</td>
         <td>{{ s['direccion'] }}</td>
-        <td>{{ s['telefono'] or '—' }}</td>
+        <td>{{ s['telefono_contacto'] or '—' }}</td>
         <td>{{ s['created_at']|cdmx }}</td>
         <td>
           <form method="post" action="{{ url_for('admin_activar_pendiente_ruta', solicitud_id=s['id']) }}">

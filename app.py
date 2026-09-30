@@ -2816,13 +2816,19 @@ def admin_dashboard(user):
         paciente["ultima_visita"] = ultima_visita["fecha"] if ultima_visita else None
         pacientes.append(paciente)
 
+    # COALESCE(u.telefono, s.telefono): quien se registra por la página guarda su teléfono en su
+    # cuenta (users), no en la solicitud -- s.telefono solo se llena para solicitudes sin dueño
+    # (cliente_id NULL). Sin este fallback, cualquier paciente que sí se registró normal se veía
+    # con teléfono en blanco aquí, aunque su cuenta sí lo tuviera.
     lista_espera = db.execute(
-        "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre FROM solicitudes s "
+        "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre, "
+        "COALESCE(u.telefono, s.telefono) AS telefono_contacto FROM solicitudes s "
         "LEFT JOIN users u ON u.id = s.cliente_id "
         "WHERE s.estado = 'lista_espera' AND s.fuera_cobertura = 0 ORDER BY s.created_at ASC"
     ).fetchall()
     pendientes_ruta = db.execute(
-        "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre FROM solicitudes s "
+        "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre, "
+        "COALESCE(u.telefono, s.telefono) AS telefono_contacto FROM solicitudes s "
         "LEFT JOIN users u ON u.id = s.cliente_id "
         "WHERE s.estado = 'lista_espera' AND s.fuera_cobertura = 1 ORDER BY s.created_at ASC"
     ).fetchall()
