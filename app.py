@@ -2394,34 +2394,36 @@ def cliente_alta(user):
             lat = lon = None
 
         db = get_db()
-        sin_cobertura = False
         if lat is not None and lon is not None:
             if direccion_ya_registrada(db, lat, lon):
                 flash("Esa dirección ya está registrada con otro paciente.", "error")
                 return render_template("cliente_alta.html")
-            sin_cobertura = fuera_de_cobertura(db, lat, lon)
+            if fuera_de_cobertura(db, lat, lon):
+                # Ya no se deja a nadie "pendiente de ruta" esperando cobertura: si todavía no
+                # llegamos a su zona, simplemente no se le inscribe (ver mensaje en el formulario);
+                # puede volver a intentarlo más adelante o con otra dirección.
+                flash(
+                    "Por ahora no tenemos ruta en tu zona, así que todavía no podemos inscribirte. "
+                    "Puedes intentarlo más adelante o revisar si otra dirección cercana sí está cubierta.",
+                    "error",
+                )
+                return render_template("cliente_alta.html")
 
         en_espera = contar_pacientes_activos(db) >= MAX_PACIENTES_ACTIVOS
         # Ya no se le asigna una zona fija: se queda como cualquier otro pendiente, y se integra
         # a la ruta que le toque por cercanía cuando se arme (ver armar_ruta_sugerida) — no a una
         # ruta ya programada que pudiera desarmarse solo por dar cabida a un ingreso nuevo.
-        estado_inicial = "lista_espera" if (en_espera or sin_cobertura) else "pendiente_entrega"
+        estado_inicial = "lista_espera" if en_espera else "pendiente_entrega"
         cur = db.execute(
             "INSERT INTO solicitudes (cliente_id, direccion, codigo_postal, material, lat, lon, "
-            "estado, fuera_cobertura, revisado) VALUES (?, ?, ?, 'PVC', ?, ?, ?, ?, 0)",
-            (user["id"], direccion, codigo_postal, lat, lon, estado_inicial,
-             1 if sin_cobertura else 0),
+            "estado, revisado) VALUES (?, ?, ?, 'PVC', ?, ?, ?, 0)",
+            (user["id"], direccion, codigo_postal, lat, lon, estado_inicial),
         )
         db.execute("UPDATE users SET alta_completa = 1, terminos_aceptados = 1 WHERE id = ?", (user["id"],))
         if en_espera:
             mensaje = (
                 f"'{user['name']}' se dio de alta — {direccion}. "
                 f"Cupo lleno ({MAX_PACIENTES_ACTIVOS} pacientes activos): quedó en lista de espera."
-            )
-        elif sin_cobertura:
-            mensaje = (
-                f"'{user['name']}' se dio de alta — {direccion}. "
-                "No hay ruta en su zona: quedó pendiente de ruta."
             )
         else:
             mensaje = f"'{user['name']}' se dio de alta — {direccion}. Pendiente de entrega de bote."
@@ -2441,19 +2443,6 @@ def cliente_alta(user):
             flash(
                 "¡Registro completo! Por ahora llegamos al cupo máximo de pacientes activos, "
                 "así que quedaste en la lista de espera — te avisaremos en cuanto haya lugar.",
-                "success",
-            )
-        elif sin_cobertura:
-            enviar_whatsapp_primer_contacto(
-                telefono_whatsapp_e164(user["telefono"]),
-                "TWILIO_TEMPLATE_SIN_COBERTURA_SID",
-                {"1": user["name"]},
-                f"Hola {user['name']},\n\n"
-                "Tu registro quedó completo. Por ahora no tenemos ruta en tu zona, así que tu recolección "
-                "queda pendiente — en cuanto tengamos cobertura ahí te avisaremos y te integraremos a una ruta.",
-            )
-            flash(
-                "¡Registro completo! Por ahora no tenemos ruta en tu zona — te avisaremos en cuanto la tengamos.",
                 "success",
             )
         else:
