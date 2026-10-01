@@ -1259,15 +1259,30 @@ def procesar_confirmaciones_vencidas():
                 continue
             ruta_id, lat, lon, solicitud_id = resultado
             sol = conn.execute(
-                "SELECT COALESCE(u.name, s.nombre_contacto) AS nombre FROM solicitudes s "
+                "SELECT s.cliente_id, COALESCE(u.name, s.nombre_contacto) AS nombre, "
+                "COALESCE(u.telefono, s.telefono) AS telefono FROM solicitudes s "
                 "LEFT JOIN users u ON u.id = s.cliente_id WHERE s.id = ?", (solicitud_id,)
             ).fetchone()
+            nombre = sol["nombre"] if sol else None
             crear_notificacion_admin(
-                conn, None,
-                f"'{sol['nombre'] if sol else solicitud_id}' no confirmó a tiempo su recolección — "
+                conn, sol["cliente_id"] if sol else None,
+                f"'{nombre or solicitud_id}' no confirmó a tiempo su recolección — "
                 "se liberó su lugar y se buscó al siguiente paciente más cercano.",
             )
             conn.commit()
+            if sol and sol["telefono"]:
+                enviar_whatsapp_primer_contacto_respetando_horario(
+                    conn,
+                    telefono_whatsapp_e164(sol["telefono"]),
+                    "TWILIO_TEMPLATE_CANCELADA_SIN_RESPUESTA_SID",
+                    {"1": nombre or "paciente"},
+                    f"Hola {nombre or ''},\n\n"
+                    "Tu recolección programada se canceló porque no recibimos tu confirmación a "
+                    "tiempo. No perdiste tu lugar: te reagendaremos en cuanto te vuelva a tocar "
+                    "una ruta por tu zona.\n\n"
+                    "Si tienes dudas, contáctanos por este medio.",
+                )
+                conn.commit()
             intentar_llenar_hueco_ausente(conn, ruta_id, lat, lon, solicitud_id_ausente=solicitud_id)
     finally:
         conn.close()
