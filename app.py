@@ -2388,8 +2388,16 @@ def cliente_alta(user):
         return redirect(url_for("cliente_dashboard"))
 
     if request.method == "POST":
-        direccion = request.form["direccion"].strip()
-        codigo_postal = request.form.get("codigo_postal", "").strip() or None
+        calle = request.form.get("calle", "").strip()
+        numero = request.form.get("numero", "").strip()
+        colonia = request.form.get("colonia", "").strip()
+        municipio = request.form.get("municipio", "").strip()
+        codigo_postal = request.form.get("codigo_postal", "").strip()
+        estado_direccion = request.form.get("estado", "").strip()
+        if not all([calle, numero, colonia, municipio, codigo_postal, estado_direccion]):
+            flash("Completa todos los campos de la dirección (calle, número, colonia, municipio o alcaldía, código postal y estado).", "error")
+            return render_template("cliente_alta.html")
+        direccion = f"{calle} {numero}, {colonia}, {municipio}, {estado_direccion}"
         lat = request.form.get("lat", "").strip()
         lon = request.form.get("lon", "").strip()
         try:
@@ -2728,8 +2736,16 @@ def cliente_actualizar_direccion(user):
         )
         return redirect(url_for("cliente_dashboard", tab="direccion"))
 
-    direccion = request.form["direccion"].strip()
-    codigo_postal = request.form.get("codigo_postal", "").strip() or None
+    calle = request.form.get("calle", "").strip()
+    numero = request.form.get("numero", "").strip()
+    colonia = request.form.get("colonia", "").strip()
+    municipio = request.form.get("municipio", "").strip()
+    codigo_postal = request.form.get("codigo_postal", "").strip()
+    estado_direccion = request.form.get("estado", "").strip()
+    if not all([calle, numero, colonia, municipio, codigo_postal, estado_direccion]):
+        flash("Completa todos los campos de la dirección (calle, número, colonia, municipio o alcaldía, código postal y estado).", "error")
+        return redirect(url_for("cliente_dashboard", tab="direccion"))
+    direccion = f"{calle} {numero}, {colonia}, {municipio}, {estado_direccion}"
     lat = request.form.get("lat", "").strip()
     lon = request.form.get("lon", "").strip()
     try:

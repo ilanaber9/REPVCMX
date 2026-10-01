@@ -9,10 +9,30 @@
   <h1>Dar de alta tu dirección</h1>
   <p style="color:var(--muted); font-size:0.9rem;">Un último paso: dinos dónde te entregamos tu primer bote.</p>
   <form method="post" action="{{ url_for('cliente_alta') }}">
-    <label>Dirección</label>
-    <input type="text" id="paciente-direccion" name="direccion" required>
-    <label>Código postal</label>
-    <input type="text" id="paciente-cp" name="codigo_postal" maxlength="5" pattern="[0-9]*" inputmode="numeric" style="max-width:160px;">
+    <div style="display:flex; gap:10px;">
+      <div style="flex:3;">
+        <label>Calle</label>
+        <input type="text" id="paciente-calle" name="calle" required>
+      </div>
+      <div style="flex:1;">
+        <label>Número</label>
+        <input type="text" id="paciente-numero" name="numero" required>
+      </div>
+    </div>
+    <label>Colonia</label>
+    <input type="text" id="paciente-colonia" name="colonia" required>
+    <label>Municipio o alcaldía</label>
+    <input type="text" id="paciente-municipio" name="municipio" required>
+    <div style="display:flex; gap:10px;">
+      <div style="flex:1;">
+        <label>Código postal</label>
+        <input type="text" id="paciente-cp" name="codigo_postal" required maxlength="5" pattern="[0-9]{5}" inputmode="numeric">
+      </div>
+      <div style="flex:1;">
+        <label>Estado</label>
+        <input type="text" id="paciente-estado" name="estado" required>
+      </div>
+    </div>
     <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
       <button type="button" class="small secondary" id="btn-buscar-direccion">Buscar en el mapa</button>
       <button type="button" class="small secondary" id="btn-ubicacion-actual">📍 Usar mi ubicación actual</button>
@@ -90,6 +110,15 @@ function actualizarCoords(lat, lon) {
 
 mapaPaciente.on('click', (e) => ubicar(e.latlng.lat, e.latlng.lng, false));
 
+function direccionTexto() {
+  const calle = document.getElementById('paciente-calle').value.trim();
+  const numero = document.getElementById('paciente-numero').value.trim();
+  const colonia = document.getElementById('paciente-colonia').value.trim();
+  const municipio = document.getElementById('paciente-municipio').value.trim();
+  const edo = document.getElementById('paciente-estado').value.trim();
+  return [[calle, numero].filter(Boolean).join(' '), colonia, municipio, edo].filter(Boolean).join(', ');
+}
+
 const resultadosDiv = document.getElementById('resultados-direccion');
 
 function mostrarResultados(resultados) {
@@ -119,9 +148,9 @@ function mostrarResultados(resultados) {
 }
 
 async function buscarDireccion() {
-  const direccion = document.getElementById('paciente-direccion').value.trim();
+  const direccion = direccionTexto();
   if (!direccion) {
-    estado.textContent = 'Escribe una dirección primero.';
+    estado.textContent = 'Escribe al menos la calle primero.';
     return;
   }
   const cp = document.getElementById('paciente-cp').value.trim();
@@ -145,12 +174,12 @@ document.getElementById('btn-buscar-direccion').addEventListener('click', buscar
 let temporizadorDireccion = null;
 function buscarDireccionAutomatico() {
   clearTimeout(temporizadorDireccion);
-  const direccion = document.getElementById('paciente-direccion').value.trim();
-  if (direccion.length < 8) return;
+  if (document.getElementById('paciente-calle').value.trim().length < 3) return;
   temporizadorDireccion = setTimeout(buscarDireccion, 700);
 }
-document.getElementById('paciente-direccion').addEventListener('input', buscarDireccionAutomatico);
-document.getElementById('paciente-cp').addEventListener('input', buscarDireccionAutomatico);
+['paciente-calle', 'paciente-numero', 'paciente-colonia', 'paciente-municipio', 'paciente-cp', 'paciente-estado'].forEach((id) => {
+  document.getElementById(id).addEventListener('input', buscarDireccionAutomatico);
+});
 
 document.getElementById('btn-ubicacion-actual').addEventListener('click', () => {
   if (!navigator.geolocation) {
@@ -164,16 +193,7 @@ document.getElementById('btn-ubicacion-actual').addEventListener('click', () => 
       const lat = posicion.coords.latitude;
       const lon = posicion.coords.longitude;
       ubicar(lat, lon);
-      estado.textContent = 'Ubicación encontrada. Revisa que el pin esté en el lugar correcto.';
-      try {
-        const resp = await fetch(`/cliente/geocodificar-inverso?lat=${lat}&lon=${lon}`);
-        const data = await resp.json();
-        if (data.direccion) {
-          document.getElementById('paciente-direccion').value = data.direccion;
-        }
-      } catch (e) {
-        // si falla la dirección en texto, el pin y las coordenadas ya quedaron bien
-      }
+      estado.textContent = 'Ubicación encontrada. Completa los campos de tu dirección y revisa que el pin esté en el lugar correcto.';
     },
     () => {
       estado.textContent = 'No pudimos obtener tu ubicación — revisa los permisos de ubicación del navegador, o búscala/márcala en el mapa.';
@@ -195,8 +215,8 @@ const bloqueConfirmacion = document.getElementById('confirmacion-datos');
 
 document.getElementById('btn-terminar-registro').addEventListener('click', () => {
   if (!formAlta.reportValidity()) return;
-  document.getElementById('confirmar-direccion').textContent = document.getElementById('paciente-direccion').value.trim();
-  document.getElementById('confirmar-cp').textContent = document.getElementById('paciente-cp').value.trim() || 'No indicado';
+  document.getElementById('confirmar-direccion').textContent = direccionTexto();
+  document.getElementById('confirmar-cp').textContent = document.getElementById('paciente-cp').value.trim();
   formAlta.style.display = 'none';
   bloqueConfirmacion.style.display = 'block';
   bloqueConfirmacion.scrollIntoView({behavior: 'smooth', block: 'start'});
