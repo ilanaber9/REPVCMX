@@ -307,7 +307,8 @@ CREATE TABLE paradas (
   cajas_reales INTEGER,
   cajas_reales_extra INTEGER,
   confirmado_paciente TEXT,
-  confirmacion_token TEXT
+  confirmacion_token TEXT,
+  confirmacion_vencimiento TEXT
 );
 
 -- Correcciones de datos que solo deben aplicarse una vez (ver aplicar_migraciones_pendientes en

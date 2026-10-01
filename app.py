@@ -132,6 +132,13 @@ HORA_CORTE_AVISOS_NOCTURNO = _hora_corte_avisos()  # después de esta hora, un a
 # descanso del paciente.
 HORA_ENVIO_AVISOS_MATUTINO = dtime(7, 0)
 
+# Plazos para que un paciente confirme si podrá recibir su recolección/entrega programada antes
+# de que se reasigne al siguiente más cercano (ver _calcular_vencimiento_confirmacion): primero
+# hasta las 2pm, luego hasta las 9pm; después de las 9pm ya no hay más plazo que ofrecer -- el
+# recolector maneja en campo lo que encuentre, igual que cualquier ausencia hoy.
+HORA_LIMITE_CONFIRMACION_1 = dtime(14, 0)
+HORA_LIMITE_CONFIRMACION_2 = dtime(21, 0)
+
 
 def ahora_negocio():
     return datetime.now(ZONA_HORARIA_NEGOCIO)
@@ -152,6 +159,32 @@ def ahora_negocio_local():
     """Hora de Ciudad de México sin zona horaria, en el mismo formato en que se guardan
     hora_inicio_real/hora_fin_real y con el que se arman los horarios que ve el paciente."""
     return ahora_negocio().replace(tzinfo=None)
+
+
+def _calcular_vencimiento_confirmacion(ahora, fecha_ruta, hora_salida):
+    """Calcula el plazo límite para que un paciente confirme su parada: el primero en notificarse
+    tiene hasta HORA_LIMITE_CONFIRMACION_1 (2pm); si se reasigna, el siguiente tiene hasta
+    HORA_LIMITE_CONFIRMACION_2 (9pm); si se vuelve a reasignar, el siguiente tiene hasta la hora
+    de salida de la ruta -- después de eso ya no hay más plazo que ofrecer (ver
+    procesar_confirmaciones_vencidas). Se escoge el más próximo de los tres que todavía no haya
+    pasado respecto a `ahora` (no un orden fijo 1/2/salida), para que una ruta armada tarde en el
+    día (p. ej. a las 4pm) no intente ofrecer un plazo de las 2pm que ya pasó -- cae directo en el
+    plazo de las 9pm, que es el siguiente que de verdad aplica."""
+    try:
+        h, m = (int(x) for x in hora_salida.split(":"))
+    except (ValueError, AttributeError):
+        h, m = 8, 0
+    fecha = datetime.strptime(fecha_ruta, "%Y-%m-%d").date()
+    salida_ruta = datetime.combine(fecha, dtime(h, m))
+    candidatos = sorted(
+        dt for dt in (
+            ahora.replace(hour=HORA_LIMITE_CONFIRMACION_1.hour, minute=HORA_LIMITE_CONFIRMACION_1.minute, second=0, microsecond=0),
+            ahora.replace(hour=HORA_LIMITE_CONFIRMACION_2.hour, minute=HORA_LIMITE_CONFIRMACION_2.minute, second=0, microsecond=0),
+            salida_ruta,
+        )
+        if dt > ahora
+    )
+    return candidatos[0] if candidatos else None
 
 
 # Filiberto Gómez 279, Tlalnepantla de Baz, Estado de México — punto de partida/regreso.
@@ -748,7 +781,11 @@ def _notificar_paradas_programadas(parada_ids):
                 continue
 
             token = secrets.token_urlsafe(24)
-            conn.execute("UPDATE paradas SET confirmacion_token = ? WHERE id = ?", (token, parada_id))
+            vencimiento = _calcular_vencimiento_confirmacion(ahora_negocio_local(), parada["fecha"], parada["hora_salida"])
+            conn.execute(
+                "UPDATE paradas SET confirmacion_token = ?, confirmacion_vencimiento = ? WHERE id = ?",
+                (token, vencimiento.strftime("%Y-%m-%d %H:%M:%S") if vencimiento else None, parada_id),
+            )
             conn.commit()
 
             horario = horario_estimado_parada(conn, parada_id)
@@ -1183,6 +1220,65 @@ def _hilo_avisos_programados():
             procesar_avisos_programados()
         except Exception as e:
             print(f"[avisos_programados] error: {e}")
+        time_module.sleep(300)
+
+
+def procesar_confirmaciones_vencidas():
+    """Revisa las paradas cuyo plazo de confirmación (ver _calcular_vencimiento_confirmacion) ya
+    venció sin que el paciente contestara 'sí' o 'no', y las trata igual que si el paciente hubiera
+    dicho que no: las saca de la ruta y busca al siguiente paciente más cercano para llenar el
+    hueco -- a ese siguiente candidato le toca la ventana que siga (ver
+    _notificar_paradas_programadas), y así hasta la ventana de la hora de salida, donde ya no hay
+    más plazo que ofrecer y el recolector maneja en campo lo que encuentre, igual que cualquier
+    ausencia de hoy. Corre desde un hilo en segundo plano (ver _hilo_confirmaciones_vencidas).
+    Reclama cada parada con un UPDATE condicionado antes de actuar, para que si hay más de un
+    proceso de gunicorn corriendo este mismo chequeo a la vez, cada una solo se procese una vez
+    (mismo patrón que procesar_avisos_programados)."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 20000")
+    try:
+        ahora_texto = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
+        vencidas = conn.execute(
+            "SELECT id FROM paradas WHERE estado = 'pendiente' AND confirmado_paciente IS NULL "
+            "AND confirmacion_vencimiento IS NOT NULL AND confirmacion_vencimiento <= ?",
+            (ahora_texto,),
+        ).fetchall()
+        for parada in vencidas:
+            cur = conn.execute(
+                "UPDATE paradas SET confirmacion_vencimiento = NULL WHERE id = ? AND confirmado_paciente IS NULL "
+                "AND confirmacion_vencimiento IS NOT NULL AND confirmacion_vencimiento <= ?",
+                (parada["id"], ahora_texto),
+            )
+            conn.commit()
+            if cur.rowcount == 0:
+                continue  # otro proceso ya lo estaba atendiendo, o el paciente acaba de contestar
+            resultado = marcar_parada_ausente_por_rechazo(conn, parada["id"])
+            conn.commit()
+            if resultado is None:
+                continue
+            ruta_id, lat, lon, solicitud_id = resultado
+            sol = conn.execute(
+                "SELECT COALESCE(u.name, s.nombre_contacto) AS nombre FROM solicitudes s "
+                "LEFT JOIN users u ON u.id = s.cliente_id WHERE s.id = ?", (solicitud_id,)
+            ).fetchone()
+            crear_notificacion_admin(
+                conn, None,
+                f"'{sol['nombre'] if sol else solicitud_id}' no confirmó a tiempo su recolección — "
+                "se liberó su lugar y se buscó al siguiente paciente más cercano.",
+            )
+            conn.commit()
+            intentar_llenar_hueco_ausente(conn, ruta_id, lat, lon, solicitud_id_ausente=solicitud_id)
+    finally:
+        conn.close()
+
+
+def _hilo_confirmaciones_vencidas():
+    while True:
+        try:
+            procesar_confirmaciones_vencidas()
+        except Exception as e:
+            print(f"[confirmaciones_vencidas] error: {e}")
         time_module.sleep(300)
 
 
@@ -1686,6 +1782,14 @@ def aplicar_migraciones_pendientes():
         # quede escondido de golpe: solo las altas NUEVAS (cliente_alta) se crean con 0, para que
         # el admin las revise primero -- ver admin_revisar_solicitud.
         db.execute("ALTER TABLE solicitudes ADD COLUMN revisado INTEGER NOT NULL DEFAULT 1")
+
+    columnas_paradas = {r["name"] for r in db.execute("PRAGMA table_info(paradas)")}
+    if "confirmacion_vencimiento" not in columnas_paradas:
+        # Plazo límite para que el paciente confirme su parada antes de que se reasigne al
+        # siguiente más cercano -- ver _calcular_vencimiento_confirmacion y
+        # procesar_confirmaciones_vencidas. NULL en paradas viejas: no se les aplica (ya tenían
+        # su token de confirmación mandado desde antes de este cambio).
+        db.execute("ALTER TABLE paradas ADD COLUMN confirmacion_vencimiento TEXT")
 
     # Tabla genérica para marcar correcciones de datos que solo deben aplicarse una vez (a
     # diferencia de los ALTER TABLE de arriba, que son idempotentes por naturaleza, un UPDATE de
@@ -5594,14 +5698,16 @@ def intentar_llenar_hueco_ausente(
     if solicitud_id_ausente is not None:
         ids_en_ruta.add(solicitud_id_ausente)
 
-    # Busca candidatos por la zona REAL de la ruta (ruta.zona), no por el campo zona de la
-    # solicitud ausente — así, si esa solicitud se hubiera quedado con un valor de zona viejo,
-    # de todos modos se busca y se coloca en la ruta en la que en verdad está parada.
+    # Busca candidatos por cercanía real a la parada que se quedó vacía, en todo el pool de
+    # pendientes -- igual que armar_ruta_sugerida, sin filtrar por zona. Antes se exigía
+    # solicitudes.zona = ruta.zona, pero desde que se quitaron las rutas por zona fija ese campo
+    # solo guarda el NOMBRE de la ruta a la que ya perteneció una solicitud -- como cada ruta
+    # nueva tiene un nombre único, esa comparación casi nunca encontraba a nadie, aunque hubiera
+    # pacientes pendientes cerca.
     candidatos = db.execute(
-        "SELECT id, estado, lat, lon, direccion FROM solicitudes WHERE zona = ? "
-        "AND estado IN ('pendiente', 'pendiente_entrega') "
-        f"AND {condicion_lista_para_recoleccion()} AND lat IS NOT NULL AND lon IS NOT NULL",
-        (ruta["zona"],),
+        "SELECT id, estado, lat, lon, direccion FROM solicitudes WHERE "
+        "estado IN ('pendiente', 'pendiente_entrega') "
+        f"AND {condicion_lista_para_recoleccion()} AND lat IS NOT NULL AND lon IS NOT NULL"
     ).fetchall()
     candidatos = [c for c in candidatos if c["id"] not in ids_en_ruta]
     if not candidatos:
@@ -6017,6 +6123,7 @@ def _precalentar_estimados_rutas():
 init_db()
 threading.Thread(target=_precalentar_estimados_rutas, daemon=True).start()
 threading.Thread(target=_hilo_avisos_programados, daemon=True).start()
+threading.Thread(target=_hilo_confirmaciones_vencidas, daemon=True).start()
 threading.Thread(target=_hilo_respaldo_diario, daemon=True).start()
 
 if __name__ == "__main__":
