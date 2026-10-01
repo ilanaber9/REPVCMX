@@ -1687,6 +1687,34 @@ def aplicar_migraciones_pendientes():
         # el admin las revise primero -- ver admin_revisar_solicitud.
         db.execute("ALTER TABLE solicitudes ADD COLUMN revisado INTEGER NOT NULL DEFAULT 1")
 
+    # Tabla genérica para marcar correcciones de datos que solo deben aplicarse una vez (a
+    # diferencia de los ALTER TABLE de arriba, que son idempotentes por naturaleza, un UPDATE de
+    # backfill no lo es: si corriera en cada arranque, podría deshacer cambios legítimos hechos
+    # después a mano, como "marcar listo para recolección").
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS migraciones_una_vez ("
+        "  clave TEXT PRIMARY KEY,"
+        "  aplicada_en TEXT DEFAULT (datetime('now','localtime'))"
+        ")"
+    )
+    ya_aplicada = db.execute(
+        "SELECT 1 FROM migraciones_una_vez WHERE clave = ?", ("backfill_fecha_reinicio_espera_entrega_bote",)
+    ).fetchone()
+    if not ya_aplicada:
+        # admin_marcar_bote_entregado nunca guardaba fecha_reinicio_espera (a diferencia de cuando
+        # un recolector entrega el bote como parte de una ruta, que sí lo hacía) -- cualquier
+        # solicitud 'pendiente' sin esa fecha quedó "lista desde que se dio de alta", saltándose
+        # por completo la espera de 30/60 días de su primera recolección. Se corrige una sola vez,
+        # arrancando su espera hoy (no sabemos la fecha real en que se les entregó el bote).
+        ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
+        db.execute(
+            "UPDATE solicitudes SET fecha_reinicio_espera = ? WHERE estado = 'pendiente' AND fecha_reinicio_espera IS NULL",
+            (ahora,),
+        )
+        db.execute(
+            "INSERT INTO migraciones_una_vez (clave) VALUES (?)", ("backfill_fecha_reinicio_espera_entrega_bote",)
+        )
+
     db.commit()
     db.close()
 
@@ -3304,7 +3332,15 @@ def admin_marcar_bote_entregado(user, solicitud_id):
     if sol is None or sol["estado"] != "pendiente_entrega":
         flash("Ese paciente ya no está pendiente de entrega.", "error")
         return redirect(url_for("admin_dashboard", tab="solicitudes"))
-    db.execute("UPDATE solicitudes SET estado = 'pendiente' WHERE id = ?", (solicitud_id,))
+    # fecha_reinicio_espera arranca aquí, igual que cuando un recolector entrega el bote como parte
+    # de una ruta (ver _resolver_resultado_parte) -- si no se pone, el paciente queda "listo desde
+    # que se dio de alta" (ver _listo_desde_sql) y se vuelve elegible de inmediato para recolección,
+    # saltándose por completo la espera de 30/60 días de su primera recolección.
+    fecha_reinicio = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
+    db.execute(
+        "UPDATE solicitudes SET estado = 'pendiente', fecha_reinicio_espera = ? WHERE id = ?",
+        (fecha_reinicio, solicitud_id),
+    )
     registrar_movimiento_botes(db, "entrega", 1, f"Entregado a {sol['nombre_contacto'] or sol['direccion']}")
     db.commit()
     flash(

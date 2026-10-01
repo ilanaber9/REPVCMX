@@ -309,3 +309,11 @@ CREATE TABLE paradas (
   confirmado_paciente TEXT,
   confirmacion_token TEXT
 );
+
+-- Correcciones de datos que solo deben aplicarse una vez (ver aplicar_migraciones_pendientes en
+-- app.py) -- en una base nueva no hay nada que corregir, pero la tabla se crea igual para que la
+-- estructura sea la misma en todos lados.
+CREATE TABLE migraciones_una_vez (
+  clave TEXT PRIMARY KEY,
+  aplicada_en TEXT DEFAULT (datetime('now','localtime'))
+);
