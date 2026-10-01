@@ -1261,14 +1261,17 @@ def geocodificar_inverso(lat, lon):
 
 def condicion_lista_para_recoleccion(alias=""):
     """Fragmento SQL (booleano) que indica si una solicitud ya está lista para volver a
-    programarse: nunca se ha recolectado (fecha_reinicio_espera NULL, incluye pacientes nuevos
-    en su primera recolección) o ya pasó el intervalo que le toca según su modalidad —30 días
-    si es donación, 60 si es compra— contado desde su última recolección."""
+    programarse: ya la revisó un admin (ver admin_revisar_solicitud -- una alta nueva no cuenta
+    hasta que alguien confirme si es un paciente de verdad nuevo o uno migrado del proceso manual
+    con historial que ajustar) y, además, nunca se ha recolectado (fecha_reinicio_espera NULL,
+    incluye pacientes nuevos en su primera recolección) o ya pasó el intervalo que le toca según
+    su modalidad —30 días si es donación, 60 si es compra— contado desde su última recolección."""
     p = f"{alias}." if alias else ""
     dias_caso = f"CASE WHEN {p}modalidad = 'compra' THEN {DIAS_ESPERA_COMPRA} ELSE {DIAS_ESPERA_DONACION} END"
     return (
-        f"({p}fecha_reinicio_espera IS NULL OR "
-        f"datetime({p}fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') <= datetime('now', 'localtime'))"
+        f"({p}revisado = 1 AND ("
+        f"{p}fecha_reinicio_espera IS NULL OR "
+        f"datetime({p}fecha_reinicio_espera, '+' || ({dias_caso}) || ' days') <= datetime('now', 'localtime')))"
     )
 
 
@@ -1383,7 +1386,7 @@ def promover_lista_espera(db):
         return
     siguiente = db.execute(
         "SELECT * FROM solicitudes WHERE estado = 'lista_espera' AND fuera_cobertura = 0 "
-        "ORDER BY created_at ASC LIMIT 1"
+        "AND revisado = 1 ORDER BY created_at ASC LIMIT 1"
     ).fetchone()
     if siguiente is None:
         return
@@ -1671,6 +1674,13 @@ def aplicar_migraciones_pendientes():
 
     # Rutas finalizadas antes de que finalizar les cambiara el estado a 'completada'.
     db.execute("UPDATE rutas SET estado = 'completada' WHERE hora_fin_real IS NOT NULL AND estado = 'en_curso'")
+
+    columnas_solicitudes = {r["name"] for r in db.execute("PRAGMA table_info(solicitudes)")}
+    if "revisado" not in columnas_solicitudes:
+        # DEFAULT 1 para que todo lo que ya existía en producción (antes de este cambio) no se
+        # quede escondido de golpe: solo las altas NUEVAS (cliente_alta) se crean con 0, para que
+        # el admin las revise primero -- ver admin_revisar_solicitud.
+        db.execute("ALTER TABLE solicitudes ADD COLUMN revisado INTEGER NOT NULL DEFAULT 1")
 
     db.commit()
     db.close()
@@ -2398,7 +2408,7 @@ def cliente_alta(user):
         estado_inicial = "lista_espera" if (en_espera or sin_cobertura) else "pendiente_entrega"
         cur = db.execute(
             "INSERT INTO solicitudes (cliente_id, direccion, codigo_postal, material, lat, lon, "
-            "estado, fuera_cobertura) VALUES (?, ?, ?, 'PVC', ?, ?, ?, ?)",
+            "estado, fuera_cobertura, revisado) VALUES (?, ?, ?, 'PVC', ?, ?, ?, ?, 0)",
             (user["id"], direccion, codigo_postal, lat, lon, estado_inicial,
              1 if sin_cobertura else 0),
         )
@@ -2820,17 +2830,27 @@ def admin_dashboard(user):
     # cuenta (users), no en la solicitud -- s.telefono solo se llena para solicitudes sin dueño
     # (cliente_id NULL). Sin este fallback, cualquier paciente que sí se registró normal se veía
     # con teléfono en blanco aquí, aunque su cuenta sí lo tuviera.
+    # s.revisado = 1: mientras no se revise una alta nueva (ver admin_revisar_solicitud), se
+    # queda solo en "Por revisar" -- no se duplica aquí para no confundir al admin.
     lista_espera = db.execute(
         "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre, "
         "COALESCE(u.telefono, s.telefono) AS telefono_contacto FROM solicitudes s "
         "LEFT JOIN users u ON u.id = s.cliente_id "
-        "WHERE s.estado = 'lista_espera' AND s.fuera_cobertura = 0 ORDER BY s.created_at ASC"
+        "WHERE s.estado = 'lista_espera' AND s.fuera_cobertura = 0 AND s.revisado = 1 "
+        "ORDER BY s.created_at ASC"
     ).fetchall()
     pendientes_ruta = db.execute(
         "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre, "
         "COALESCE(u.telefono, s.telefono) AS telefono_contacto FROM solicitudes s "
         "LEFT JOIN users u ON u.id = s.cliente_id "
-        "WHERE s.estado = 'lista_espera' AND s.fuera_cobertura = 1 ORDER BY s.created_at ASC"
+        "WHERE s.estado = 'lista_espera' AND s.fuera_cobertura = 1 AND s.revisado = 1 "
+        "ORDER BY s.created_at ASC"
+    ).fetchall()
+    por_revisar = db.execute(
+        "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre, "
+        "COALESCE(u.telefono, s.telefono) AS telefono_contacto FROM solicitudes s "
+        "LEFT JOIN users u ON u.id = s.cliente_id "
+        "WHERE s.revisado = 0 ORDER BY s.created_at ASC"
     ).fetchall()
     pacientes_activos = contar_pacientes_activos(db)
 
@@ -3059,6 +3079,7 @@ def admin_dashboard(user):
         pacientes=pacientes,
         lista_espera=lista_espera,
         pendientes_ruta=pendientes_ruta,
+        por_revisar=por_revisar,
         pacientes_activos=pacientes_activos,
         max_pacientes_activos=MAX_PACIENTES_ACTIVOS,
         ingresos=ingresos,
@@ -3452,7 +3473,8 @@ def admin_actualizar_modalidad(user, cliente_id):
 def admin_activar_pendiente_ruta(user, solicitud_id):
     db = get_db()
     sol = db.execute(
-        "SELECT * FROM solicitudes WHERE id = ? AND estado = 'lista_espera' AND fuera_cobertura = 1",
+        "SELECT * FROM solicitudes WHERE id = ? AND estado = 'lista_espera' AND fuera_cobertura = 1 "
+        "AND revisado = 1",
         (solicitud_id,),
     ).fetchone()
     if sol is None:
@@ -3504,6 +3526,53 @@ def admin_marcar_bote_devolver(user, solicitud_id):
     nombre = sol["nombre_contacto"] or sol["direccion"]
     flash(f"Se marcó que '{nombre}' debe regresar el bote — aparecerá en su próxima ruta.", "success")
     return redirect(url_for("admin_dashboard", tab="pacientes"))
+
+
+@app.route("/admin/solicitudes/<int:solicitud_id>/revisar", methods=["POST"])
+@login_required("admin")
+def admin_revisar_solicitud(user, solicitud_id):
+    """Confirma la revisión de una alta nueva (ver 'Por revisar'). Si el admin marca que el
+    paciente ya tenía bote (viene del proceso manual de antes de la app), se salta la entrega,
+    igual que admin_cancelar_entrega_bote. Si además da la fecha real de su última recolección,
+    esa fecha se guarda como fecha_reinicio_espera para que la espera de 30/60 días se cuente
+    desde ahí y no desde que se dio de alta aquí -- si no se llena nada, se trata como un
+    paciente nuevo de verdad: listo de inmediato para su primera ruta."""
+    db = get_db()
+    sol = db.execute("SELECT * FROM solicitudes WHERE id = ? AND revisado = 0", (solicitud_id,)).fetchone()
+    if sol is None:
+        flash("Esa solicitud ya no está pendiente de revisión.", "error")
+        return redirect(url_for("admin_dashboard", tab="por_revisar"))
+
+    nombre = sol["nombre_contacto"] or sol["direccion"]
+    if sol["cliente_id"]:
+        u = db.execute("SELECT name FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
+        if u:
+            nombre = u["name"]
+
+    fecha_ultima = request.form.get("fecha_ultima_recoleccion", "").strip()
+    fecha_reinicio = sol["fecha_reinicio_espera"]
+    if fecha_ultima:
+        try:
+            fecha_valida = datetime.strptime(fecha_ultima, "%Y-%m-%d")
+        except ValueError:
+            flash("La fecha de última recolección no es válida.", "error")
+            return redirect(url_for("admin_dashboard", tab="por_revisar"))
+        if fecha_valida.date() > date.today():
+            flash("La fecha de última recolección no puede ser en el futuro.", "error")
+            return redirect(url_for("admin_dashboard", tab="por_revisar"))
+        fecha_reinicio = fecha_valida.strftime("%Y-%m-%d %H:%M:%S")
+
+    nuevo_estado = sol["estado"]
+    if request.form.get("ya_tiene_bote") == "on" and sol["estado"] == "pendiente_entrega":
+        nuevo_estado = "pendiente"
+
+    db.execute(
+        "UPDATE solicitudes SET estado = ?, fecha_reinicio_espera = ?, revisado = 1 WHERE id = ?",
+        (nuevo_estado, fecha_reinicio, solicitud_id),
+    )
+    db.commit()
+    flash(f"'{nombre}' quedó revisado y pasa a la lista de pacientes normal.", "success")
+    return redirect(url_for("admin_dashboard", tab="por_revisar"))
 
 
 @app.route("/admin/solicitudes/<int:solicitud_id>/listo-recoleccion", methods=["POST"])

@@ -256,6 +256,7 @@ CREATE TABLE solicitudes (
   lon REAL,
   zona TEXT,
   estado TEXT NOT NULL DEFAULT 'pendiente' CHECK(estado IN ('pendiente','pendiente_entrega','entregado','programada','recolectada','incidencia','cancelada','lista_espera')),
+  revisado INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now','localtime')),
   CHECK (cliente_id IS NOT NULL OR nombre_contacto IS NOT NULL)
 );

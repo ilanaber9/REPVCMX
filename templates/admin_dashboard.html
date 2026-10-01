@@ -61,7 +61,7 @@
 {% block content %}
 
 <div class="tabs">
-  <button type="button" class="tab-btn" data-tab="pacientes">Pacientes{% if lista_espera %} ({{ lista_espera|length }} en espera){% endif %}</button>
+  <button type="button" class="tab-btn" data-tab="pacientes">Pacientes{% if por_revisar %} ({{ por_revisar|length }} por revisar){% elif lista_espera %} ({{ lista_espera|length }} en espera){% endif %}</button>
   <button type="button" class="tab-btn" data-tab="rutas">Programación de ruta</button>
   <button type="button" class="tab-btn" data-tab="solicitudes">Solicitudes pendientes</button>
   <button type="button" class="tab-btn" data-tab="auditoria">Auditoría de rutas{% if total_auditoria_rutas %} ({{ total_auditoria_rutas }}){% endif %}</button>
@@ -536,10 +536,50 @@
 
 <div class="tab-panel" data-tab="pacientes">
   <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab-btn" data-subtab="por_revisar">Por revisar{% if por_revisar %} ({{ por_revisar|length }}){% endif %}</button>
     <button type="button" class="subtab-btn" data-subtab="lista">Lista de pacientes</button>
     <button type="button" class="subtab-btn" data-subtab="inscritos">Pacientes inscritos</button>
     <button type="button" class="subtab-btn" data-subtab="espera">Lista de espera{% if lista_espera %} ({{ lista_espera|length }}){% endif %}</button>
     <button type="button" class="subtab-btn" data-subtab="pendientes_ruta">Pendientes de ruta{% if pendientes_ruta %} ({{ pendientes_ruta|length }}){% endif %}</button>
+  </div>
+
+  <div class="subtab-panel" data-subtab="por_revisar">
+  <div class="card">
+    <h1 style="margin:0;">Por revisar</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Toda alta nueva pasa por aquí antes de entrar a la lista de pacientes normal. Sirve para
+      detectar pacientes que en realidad vienen del proceso manual de antes: si ya tenían bote en
+      casa o si su última recolección real fue antes de darse de alta aquí, ajústalo abajo para que
+      el sistema calcule bien cuándo les toca — si no se ajusta nada, se trata como un paciente
+      nuevo de verdad (listo para su primera ruta, sin espera).
+    </p>
+    {% if por_revisar %}
+    {% for s in por_revisar %}
+    <form method="post" action="{{ url_for('admin_revisar_solicitud', solicitud_id=s['id']) }}"
+          style="border:1px solid var(--border); border-radius:10px; padding:14px 16px; margin-top:12px;">
+      <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <strong>{{ s['cliente_nombre'] }}</strong>
+        <span style="color:var(--muted); font-size:0.85rem;">Se dio de alta: {{ s['created_at']|cdmx }}</span>
+      </div>
+      <p style="color:var(--muted); font-size:0.9rem; margin:4px 0 12px;">
+        {{ s['direccion'] }}{% if s['telefono_contacto'] %} · {{ s['telefono_contacto'] }}{% endif %}
+      </p>
+      <label style="display:flex; align-items:center; gap:8px; font-size:0.92rem; color:var(--text);">
+        <input type="checkbox" name="ya_tiene_bote" style="width:auto; margin:0;"
+               {% if s['estado'] != 'pendiente_entrega' %}disabled{% endif %}>
+        Ya tiene bote en casa (viene del proceso manual, no hace falta entregarle uno)
+      </label>
+      <label>Fecha real de su última recolección (déjalo vacío si de verdad es nuevo)</label>
+      <input type="date" name="fecha_ultima_recoleccion" style="max-width:220px;">
+      <div>
+        <button type="submit">Revisado — pasar a la lista de pacientes</button>
+      </div>
+    </form>
+    {% endfor %}
+    {% else %}
+    <p class="empty">No hay altas nuevas pendientes de revisar.</p>
+    {% endif %}
+  </div>
   </div>
 
   <div class="subtab-panel" data-subtab="inscritos">
@@ -1592,6 +1632,7 @@ const TAB_ALIAS = {
   inscritos: {tab: 'pacientes', subtab: 'inscritos'},
   espera: {tab: 'pacientes', subtab: 'espera'},
   pendientes_ruta: {tab: 'pacientes', subtab: 'pendientes_ruta'},
+  por_revisar: {tab: 'pacientes', subtab: 'por_revisar'},
   dinero: {tab: 'dinero', subtab: 'ingreso'},
   ingreso: {tab: 'dinero', subtab: 'ingreso'},
   egreso: {tab: 'dinero', subtab: 'egreso'},
