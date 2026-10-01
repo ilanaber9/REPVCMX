@@ -1351,14 +1351,19 @@ def fuera_de_cobertura(db, lat, lon):
 RADIO_DIRECCION_DUPLICADA_KM = 0.03  # ~30 metros: se considera la misma dirección
 
 
-def direccion_ya_registrada(db, lat, lon):
-    """True si ya existe un paciente (solicitud con dirección de recolección, no cancelada)
-    a menos de RADIO_DIRECCION_DUPLICADA_KM de (lat, lon) — es decir, la misma dirección."""
+def direccion_ya_registrada(db, lat, lon, excluir_id=None):
+    """True si ya existe OTRO paciente (solicitud con dirección de recolección, no cancelada)
+    a menos de RADIO_DIRECCION_DUPLICADA_KM de (lat, lon) — es decir, la misma dirección.
+    excluir_id sirve para que un paciente pueda volver a guardar su propia dirección (p. ej. al
+    actualizarla) sin que choque consigo mismo."""
     filas = db.execute(
-        "SELECT lat, lon FROM solicitudes WHERE lat IS NOT NULL AND lon IS NOT NULL "
+        "SELECT id, lat, lon FROM solicitudes WHERE lat IS NOT NULL AND lon IS NOT NULL "
         "AND estado != 'cancelada'"
     ).fetchall()
-    return any(haversine_km(lat, lon, f["lat"], f["lon"]) <= RADIO_DIRECCION_DUPLICADA_KM for f in filas)
+    return any(
+        f["id"] != excluir_id and haversine_km(lat, lon, f["lat"], f["lon"]) <= RADIO_DIRECCION_DUPLICADA_KM
+        for f in filas
+    )
 
 
 def contar_pacientes_activos(db):
@@ -2701,6 +2706,60 @@ def cliente_regresar_bote(user):
         db.commit()
         flash("Listo, marcamos que vas a regresar el bote — lo recogeremos en tu próxima ruta.", "success")
     return redirect(url_for("cliente_dashboard", tab="notificaciones"))
+
+
+@app.route("/cliente/actualizar-direccion", methods=["POST"])
+@login_required("cliente")
+def cliente_actualizar_direccion(user):
+    db = get_db()
+    sol = db.execute(
+        "SELECT id, estado FROM solicitudes WHERE cliente_id = ? AND tipo_redistribucion IS NULL "
+        "ORDER BY created_at DESC LIMIT 1",
+        (user["id"],),
+    ).fetchone()
+    if sol is None:
+        flash("No encontramos tu solicitud — contáctanos directamente.", "error")
+        return redirect(url_for("cliente_dashboard", tab="direccion"))
+    if sol["estado"] == "programada":
+        flash(
+            "Tu recolección ya está programada con esta dirección, así que no se puede cambiar "
+            "aquí — escríbenos directamente si necesitas actualizarla.",
+            "error",
+        )
+        return redirect(url_for("cliente_dashboard", tab="direccion"))
+
+    direccion = request.form["direccion"].strip()
+    codigo_postal = request.form.get("codigo_postal", "").strip() or None
+    lat = request.form.get("lat", "").strip()
+    lon = request.form.get("lon", "").strip()
+    try:
+        lat = float(lat) if lat else None
+        lon = float(lon) if lon else None
+    except ValueError:
+        lat = lon = None
+
+    if lat is not None and lon is not None:
+        if direccion_ya_registrada(db, lat, lon, excluir_id=sol["id"]):
+            flash("Esa dirección ya está registrada con otro paciente.", "error")
+            return redirect(url_for("cliente_dashboard", tab="direccion"))
+        if fuera_de_cobertura(db, lat, lon):
+            # Mismo criterio que al darse de alta: si la nueva ubicación no tiene cobertura, no
+            # se guarda el cambio -- se queda con la dirección que ya tenía.
+            flash(
+                "Por ahora no tenemos ruta en esa zona, así que no podemos actualizar tu dirección "
+                "a esa ubicación. Tu dirección anterior se queda sin cambios.",
+                "error",
+            )
+            return redirect(url_for("cliente_dashboard", tab="direccion"))
+
+    db.execute(
+        "UPDATE solicitudes SET direccion = ?, codigo_postal = ?, lat = ?, lon = ? WHERE id = ?",
+        (direccion, codigo_postal, lat, lon, sol["id"]),
+    )
+    crear_notificacion_admin(db, user["id"], f"'{user['name']}' actualizó su dirección — {direccion}.")
+    db.commit()
+    flash("Tu dirección se actualizó correctamente.", "success")
+    return redirect(url_for("cliente_dashboard", tab="direccion"))
 
 
 # ---------- Admin ----------
