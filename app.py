@@ -3611,6 +3611,33 @@ def admin_quitar_parada(user, parada_id):
     return redirect(url_for("admin_ver_ruta", ruta_id=ruta_id))
 
 
+@app.route("/admin/solicitudes/<int:solicitud_id>/quitar-pendiente-ruta", methods=["POST"])
+@login_required("admin")
+def admin_quitar_pendiente_ruta(user, solicitud_id):
+    """Quita a alguien de 'Pendientes de ruta' sin borrar su cuenta: elimina solo su solicitud y
+    le regresa el paso de dar de alta su dirección, así al volver a entrar puede registrarla bien
+    (con los campos separados y la revisión de cobertura) en vez de quedarse esperando ruta."""
+    db = get_db()
+    sol = db.execute(
+        "SELECT * FROM solicitudes WHERE id = ? AND estado = 'lista_espera' AND fuera_cobertura = 1",
+        (solicitud_id,),
+    ).fetchone()
+    if sol is None:
+        flash("Esa solicitud ya no está pendiente de ruta.", "error")
+        return redirect(url_for("admin_dashboard", tab="pendientes_ruta"))
+    nombre = sol["nombre_contacto"] or sol["direccion"]
+    if sol["cliente_id"]:
+        u = db.execute("SELECT name FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
+        if u:
+            nombre = u["name"]
+        db.execute("UPDATE users SET alta_completa = 0 WHERE id = ?", (sol["cliente_id"],))
+    db.execute("DELETE FROM paradas WHERE solicitud_id = ? OR solicitud_extra_id = ?", (solicitud_id, solicitud_id))
+    db.execute("DELETE FROM solicitudes WHERE id = ?", (solicitud_id,))
+    db.commit()
+    flash(f"'{nombre}' ya no está pendiente de ruta.", "success")
+    return redirect(url_for("admin_dashboard", tab="pendientes_ruta"))
+
+
 @app.route("/admin/solicitudes/<int:solicitud_id>/eliminar", methods=["POST"])
 @login_required("admin")
 def admin_eliminar_solicitud(user, solicitud_id):

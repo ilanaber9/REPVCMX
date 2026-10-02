@@ -740,9 +740,15 @@
         <td>{{ s['telefono_contacto'] or '—' }}</td>
         <td>{{ s['created_at']|cdmx }}</td>
         <td>
-          <form method="post" action="{{ url_for('admin_activar_pendiente_ruta', solicitud_id=s['id']) }}">
-            <button type="submit" class="small">Activar</button>
-          </form>
+          <div style="display:flex; gap:6px;">
+            <form method="post" action="{{ url_for('admin_activar_pendiente_ruta', solicitud_id=s['id']) }}">
+              <button type="submit" class="small">Activar</button>
+            </form>
+            <form method="post" action="{{ url_for('admin_quitar_pendiente_ruta', solicitud_id=s['id']) }}"
+                  onsubmit="return confirm('¿Quitar de pendientes de ruta? Su cuenta se queda, pero tendrá que volver a dar su dirección.');">
+              <button type="submit" class="small danger">Quitar</button>
+            </form>
+          </div>
         </td>
       </tr>
       {% endfor %}
