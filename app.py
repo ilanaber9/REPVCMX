@@ -221,6 +221,8 @@ MINUTOS_VIGENCIA_CODIGO = 15  # los pacientes solo tienen WhatsApp (no correo), 
 
 def generar_codigo_verificacion():
     return f"{secrets.randbelow(1000000):06d}"
+SEGUNDOS_ENTRE_CODIGOS_TELEFONO = 60  # mínimo entre un código y el siguiente al cambiar de número
+MAX_INTENTOS_CODIGO_TELEFONO = 5  # intentos fallidos antes de pedir un código nuevo
 DURACION_MAXIMA_RUTA_MIN = 7 * 60 + 30  # 7:30 hrs por ruta antes de dividirla en otra
 MIN_PARADAS_DESPACHO = 8  # piso real: por debajo de esto no es rentable mandar la camioneta sola
 # por esa tanda. Si una tanda queda por debajo, primero se intenta fusionar con la ruta planificada más cercana
@@ -1583,6 +1585,10 @@ def aplicar_migraciones_pendientes():
         ("es_admin_general", "INTEGER NOT NULL DEFAULT 0"),
         ("nef_ultima_vista", "TEXT"),
         ("verificacion_token_expira", "TEXT"),
+        ("telefono_nuevo", "TEXT"),
+        ("telefono_nuevo_codigo", "TEXT"),
+        ("telefono_nuevo_expira", "TEXT"),
+        ("telefono_nuevo_intentos", "INTEGER NOT NULL DEFAULT 0"),
     ]:
         if columna not in columnas_users:
             db.execute(f"ALTER TABLE users ADD COLUMN {columna} {definicion}")
@@ -2676,9 +2682,15 @@ def cliente_dashboard(user):
 
     solicitud_principal = next((s for s in solicitudes if not s["tipo_redistribucion"]), None)
 
+    telefono_pendiente = None
+    if user["telefono_nuevo"] and user["telefono_nuevo_expira"] and \
+            user["telefono_nuevo_expira"] > ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S"):
+        telefono_pendiente = user["telefono_nuevo"]
+
     return render_template(
         "cliente_dashboard.html", solicitudes=solicitudes,
-        solicitud_principal=solicitud_principal,
+        solicitud_principal=solicitud_principal, telefono_pendiente=telefono_pendiente,
+        minutos_codigo=MINUTOS_VIGENCIA_CODIGO,
         nef_publicaciones=nef_publicaciones, nef_confirmados=nef_confirmados, nef_nuevas=nef_nuevas,
         admin_videos=admin_videos,
         cajas_donadas=cajas_donadas, cajas_recibidas=cajas_recibidas,
@@ -2844,6 +2856,91 @@ def cliente_regresar_bote(user):
         db.commit()
         flash("Listo, marcamos que vas a regresar el bote — lo recogeremos en tu próxima ruta.", "success")
     return redirect(url_for("cliente_dashboard", tab="notificaciones"))
+
+
+@app.route("/cliente/telefono/solicitar-codigo", methods=["POST"])
+@login_required("cliente")
+def cliente_telefono_solicitar_codigo(user):
+    """Primer paso para cambiar el número de WhatsApp: se manda un código al número NUEVO y el
+    cambio no se aplica hasta que el paciente lo escriba (ver cliente_telefono_confirmar_codigo)
+    -- así nadie deja una cuenta atada a un número que no es suyo, ni le llegan los avisos de
+    ruta a otra persona."""
+    nuevo = telefono_identidad(request.form.get("telefono", ""))
+    volver = redirect(url_for("cliente_dashboard", tab="direccion"))
+    if nuevo is None:
+        flash("Escribe un número de WhatsApp válido de 10 dígitos.", "error")
+        return volver
+    if nuevo == user["telefono"]:
+        flash("Ese ya es tu número de WhatsApp.", "error")
+        return volver
+    db = get_db()
+    if db.execute("SELECT 1 FROM users WHERE telefono = ? AND id != ?", (nuevo, user["id"])).fetchone():
+        flash("Ese número de WhatsApp ya está registrado con otra cuenta.", "error")
+        return volver
+
+    ahora = ahora_negocio_local()
+    if user["telefono_nuevo_expira"]:
+        # El código vigente se emitió MINUTOS_VIGENCIA_CODIGO antes de su expiración.
+        emitido = datetime.strptime(user["telefono_nuevo_expira"], "%Y-%m-%d %H:%M:%S") - timedelta(minutes=MINUTOS_VIGENCIA_CODIGO)
+        if (ahora - emitido).total_seconds() < SEGUNDOS_ENTRE_CODIGOS_TELEFONO:
+            flash("Acabamos de mandarte un código — espera un minuto antes de pedir otro.", "error")
+            return volver
+
+    codigo = generar_codigo_verificacion()
+    expira = (ahora + timedelta(minutes=MINUTOS_VIGENCIA_CODIGO)).strftime("%Y-%m-%d %H:%M:%S")
+    db.execute(
+        "UPDATE users SET telefono_nuevo = ?, telefono_nuevo_codigo = ?, telefono_nuevo_expira = ?, "
+        "telefono_nuevo_intentos = 0 WHERE id = ?",
+        (nuevo, codigo, expira, user["id"]),
+    )
+    db.commit()
+    enviado = enviar_whatsapp_primer_contacto(
+        telefono_whatsapp_e164(nuevo),
+        "TWILIO_TEMPLATE_CODIGO_VERIFICACION_SID",
+        {"1": codigo},
+        f"Hola {user['name']},\n\nTu código para confirmar tu nuevo número es: {codigo}\n\n"
+        "Si tú no pediste este cambio, ignora este mensaje.",
+    )
+    if enviado:
+        flash("Te mandamos un código por WhatsApp al número nuevo. Escríbelo para confirmar el cambio.", "success")
+    else:
+        flash("No pudimos mandar el código en este momento. Intenta de nuevo en unos minutos.", "error")
+    return volver
+
+
+@app.route("/cliente/telefono/confirmar-codigo", methods=["POST"])
+@login_required("cliente")
+def cliente_telefono_confirmar_codigo(user):
+    volver = redirect(url_for("cliente_dashboard", tab="direccion"))
+    codigo = request.form.get("codigo", "").strip()
+    ahora_texto = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
+    if not user["telefono_nuevo"] or not user["telefono_nuevo_expira"] or user["telefono_nuevo_expira"] <= ahora_texto:
+        flash("Ese código ya expiró. Pide uno nuevo.", "error")
+        return volver
+    db = get_db()
+    if user["telefono_nuevo_intentos"] >= MAX_INTENTOS_CODIGO_TELEFONO:
+        flash("Demasiados intentos fallidos. Pide un código nuevo.", "error")
+        return volver
+    if not codigo or codigo != user["telefono_nuevo_codigo"]:
+        db.execute("UPDATE users SET telefono_nuevo_intentos = telefono_nuevo_intentos + 1 WHERE id = ?", (user["id"],))
+        db.commit()
+        flash("Ese código no es correcto.", "error")
+        return volver
+    try:
+        db.execute(
+            "UPDATE users SET telefono = ?, telefono_nuevo = NULL, telefono_nuevo_codigo = NULL, "
+            "telefono_nuevo_expira = NULL, telefono_nuevo_intentos = 0 WHERE id = ?",
+            (user["telefono_nuevo"], user["id"]),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        db.rollback()
+        flash("Ese número de WhatsApp ya está registrado con otra cuenta.", "error")
+        return volver
+    crear_notificacion_admin(db, user["id"], f"'{user['name']}' cambió su número de WhatsApp.")
+    db.commit()
+    flash("Listo, tu número de WhatsApp se actualizó.", "success")
+    return volver
 
 
 @app.route("/cliente/actualizar-direccion", methods=["POST"])

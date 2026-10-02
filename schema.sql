@@ -47,6 +47,10 @@ CREATE TABLE users (
   recibir_info_nef INTEGER NOT NULL DEFAULT 0,
   nef_ultima_vista TEXT,
   es_admin_general INTEGER NOT NULL DEFAULT 0,
+  telefono_nuevo TEXT,
+  telefono_nuevo_codigo TEXT,
+  telefono_nuevo_expira TEXT,
+  telefono_nuevo_intentos INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 
