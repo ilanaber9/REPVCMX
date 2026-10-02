@@ -727,8 +727,8 @@
   <div class="card">
     <h1 style="margin:0;">Pendientes de ruta</h1>
     <p style="color:var(--muted); font-size:0.9rem;">
-      Pacientes que se registraron pero todavía no tenemos ninguna ruta en su zona. En cuanto armes
-      una ruta cerca de su dirección, actívalos aquí para integrarlos.
+      Pacientes que se registraron pero todavía no tenemos ninguna ruta en su zona. Puedes quitarlos
+      de aquí: su cuenta se queda y tendrán que volver a dar su dirección.
     </p>
     {% if pendientes_ruta %}
     <table>
@@ -741,9 +741,6 @@
         <td>{{ s['created_at']|cdmx }}</td>
         <td>
           <div style="display:flex; gap:6px;">
-            <form method="post" action="{{ url_for('admin_activar_pendiente_ruta', solicitud_id=s['id']) }}">
-              <button type="submit" class="small">Activar</button>
-            </form>
             <form method="post" action="{{ url_for('admin_quitar_pendiente_ruta', solicitud_id=s['id']) }}"
                   onsubmit="return confirm('¿Quitar de pendientes de ruta? Su cuenta se queda, pero tendrá que volver a dar su dirección.');">
               <button type="submit" class="small danger">Quitar</button>
