@@ -54,6 +54,7 @@
   <p>
     <strong>{{ filas|length }} paradas</strong>
     {% if sugerida.estimado %}· tiempo estimado ida y vuelta: <strong>{{ sugerida.estimado.duracion }}</strong> ({{ sugerida.estimado.distancia_km }} km){% endif %}
+    {% if sugerida.estimado and sugerida.estimado.fuente == 'trafico' %}<br><small style="color:var(--muted);">Con el tráfico previsto para salir el {{ sugerida.estimado.salida_texto }} (el tiempo real cambia si eliges otro día u hora).</small>{% elif sugerida.estimado and sugerida.estimado.trafico_no_disponible %}<br><small style="color:var(--muted);">No se pudo consultar el tráfico real — estimado aproximado, puede quedarse corto.</small>{% endif %}
   </p>
   <p style="color:var(--muted); font-size:0.88rem;">
     {% if paciente_id %}

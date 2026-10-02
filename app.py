@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import os
 import random
 import re
@@ -360,6 +361,187 @@ def _osrm_cache_bd_guardar(clave, resultado):
         pass
 
 
+GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
+MAX_PUNTOS_GOOGLE = 27  # origen + 25 paradas intermedias + destino por consulta
+DIAS_VIGENCIA_TRAFICO = 3  # cuánto se reutiliza un cálculo de tráfico ya hecho
+_trafico_cache = {}
+_google_sin_servicio_hasta = [0.0]
+
+
+def google_maps_configurado():
+    return bool(os.environ.get("GOOGLE_MAPS_API_KEY", "").strip())
+
+
+def salida_por_defecto():
+    """Para estimar una ruta que todavía no tiene día ni hora: la próxima salida de entre semana a
+    las 8:00 (hora de salida habitual) -- el tráfico depende mucho del día y la hora, y de entre
+    semana es cuando más pesa."""
+    ahora = ahora_negocio_local()
+    dia = ahora.date()
+    if datetime.combine(dia, dtime(8, 0)) <= ahora:
+        dia += timedelta(days=1)
+    while dia.weekday() >= 5:
+        dia += timedelta(days=1)
+    return datetime.combine(dia, dtime(8, 0))
+
+
+def salida_de_ruta(fecha, hora_salida):
+    """Fecha ('YYYY-MM-DD') y hora ('HH:MM') de salida de una ruta como datetime, o None si no son válidas."""
+    try:
+        h, m = (int(x) for x in (hora_salida or "").split(":"))
+        return datetime.combine(datetime.strptime(fecha, "%Y-%m-%d").date(), dtime(h, m))
+    except (ValueError, TypeError):
+        return None
+
+
+def _trafico_clave(secuencia, salida):
+    redondeada = tuple((round(la, 4), round(lo, 4)) for la, lo in secuencia)
+    franja = (salida.weekday(), salida.hour, 0 if salida.minute < 30 else 30)
+    return ("gm", redondeada, franja)
+
+
+def _trafico_cache_bd_leer(clave):
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=0.2)
+        try:
+            fila = conn.execute(
+                "SELECT tramos FROM trafico_cache WHERE clave = ? AND created_at >= datetime('now', ?)",
+                (_osrm_clave_bd(clave), f"-{DIAS_VIGENCIA_TRAFICO} days"),
+            ).fetchone()
+        finally:
+            conn.close()
+        if fila:
+            return json.loads(fila[0])
+    except Exception:
+        pass
+    return None
+
+
+def _trafico_cache_bd_guardar(clave, tramos):
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=0.2)
+        try:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS trafico_cache ("
+                "clave TEXT PRIMARY KEY, tramos TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))"
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO trafico_cache (clave, tramos, created_at) VALUES (?, ?, datetime('now'))",
+                (_osrm_clave_bd(clave), json.dumps(tramos)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+def _google_reservar_consulta():
+    """Cuenta una consulta a Google en el mes y dice si todavía hay cupo (GOOGLE_MAPS_MAX_CONSULTAS_MES,
+    3000 por defecto): así un error o un uso inesperado no se vuelve un cobro sorpresa. Al llegar al
+    tope se le avisa al admin una sola vez; después se usa el cálculo de siempre sin tráfico."""
+    try:
+        limite = int(os.environ.get("GOOGLE_MAPS_MAX_CONSULTAS_MES", "3000"))
+    except ValueError:
+        limite = 3000
+    mes = ahora_negocio_local().strftime("%Y-%m")
+    conn = sqlite3.connect(DB_PATH, timeout=5)
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS uso_google_maps (mes TEXT PRIMARY KEY, consultas INTEGER NOT NULL DEFAULT 0)"
+        )
+        conn.execute("INSERT OR IGNORE INTO uso_google_maps (mes, consultas) VALUES (?, 0)", (mes,))
+        actuales = conn.execute("SELECT consultas FROM uso_google_maps WHERE mes = ?", (mes,)).fetchone()[0]
+        if actuales >= limite:
+            return False
+        conn.execute("UPDATE uso_google_maps SET consultas = consultas + 1 WHERE mes = ?", (mes,))
+        if actuales + 1 == limite:
+            conn.row_factory = sqlite3.Row
+            crear_notificacion_admin(
+                conn, None,
+                f"Se llegó al límite de {limite} consultas de tráfico a Google Maps de este mes: hasta el mes "
+                "que entra, los tiempos de ruta se calculan sin tráfico real (la variable "
+                "GOOGLE_MAPS_MAX_CONSULTAS_MES en Render sube o baja este límite).",
+            )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def _google_consultar(puntos, salida, llave):
+    """Una consulta a Google Routes: minutos de cada tramo entre puntos consecutivos, con el tráfico
+    previsto para `salida` (si ya pasó, con el tráfico de ahora). None si algo falla."""
+    def punto(p):
+        return {"location": {"latLng": {"latitude": p[0], "longitude": p[1]}}}
+    cuerpo = {
+        "origin": punto(puntos[0]), "destination": punto(puntos[-1]),
+        "travelMode": "DRIVE", "routingPreference": "TRAFFIC_AWARE_OPTIMAL",
+    }
+    if len(puntos) > 2:
+        cuerpo["intermediates"] = [punto(p) for p in puntos[1:-1]]
+    ahora = ahora_negocio_local()
+    if salida > ahora + timedelta(seconds=90):
+        utc = salida.replace(tzinfo=ZONA_HORARIA_NEGOCIO).astimezone(ZoneInfo("UTC"))
+        cuerpo["departureTime"] = utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not _google_reservar_consulta():
+        return None
+    req = urllib.request.Request(
+        GOOGLE_ROUTES_URL, data=json.dumps(cuerpo).encode("utf-8"), method="POST",
+        headers={
+            "Content-Type": "application/json", "X-Goog-Api-Key": llave,
+            "X-Goog-FieldMask": "routes.duration,routes.legs.duration",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            ruta = json.loads(resp.read())["routes"][0]
+        tramos = [float(leg["duration"].rstrip("s")) / 60 for leg in ruta["legs"]]
+    except Exception as e:
+        print(f"[google_maps] consulta fallida: {e!r}")
+        return None
+    return tramos if len(tramos) == len(puntos) - 1 else None
+
+
+def _google_tramos(secuencia, salida):
+    """Minutos de manejo de cada tramo de `secuencia` con el tráfico real previsto para `salida`
+    (Google Maps), o None si no hay llave configurada o la consulta falla -- en ese caso quien llama
+    cae al cálculo de siempre. Las rutas largas se consultan por partes y a cada parte se le suma lo
+    ya recorrido (más el tiempo de cada parada) para que use el tráfico de la hora a la que de verdad
+    se llegaría ahí. Los resultados se guardan unos días, por franja de media hora."""
+    llave = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+    if not llave or len(secuencia) < 2:
+        return None
+    ahora = ahora_negocio_local()
+    if salida < ahora:
+        salida = ahora
+    clave = _trafico_clave(secuencia, salida)
+    if clave in _trafico_cache:
+        return _trafico_cache[clave]
+    guardado = _trafico_cache_bd_leer(clave)
+    if guardado is not None:
+        _trafico_cache[clave] = guardado
+        return guardado
+    if time_module.time() < _google_sin_servicio_hasta[0]:
+        return None
+    tramos = []
+    i = 0
+    while i < len(secuencia) - 1:
+        trozo = secuencia[i:i + MAX_PUNTOS_GOOGLE]
+        salida_trozo = salida + timedelta(minutes=sum(tramos) + len(tramos) * MINUTOS_POR_PARADA)
+        legs = _google_consultar(trozo, salida_trozo, llave)
+        if legs is None:
+            _google_sin_servicio_hasta[0] = time_module.time() + 60
+            return None
+        tramos += legs
+        i += len(trozo) - 1
+    if len(_trafico_cache) > 500:
+        _trafico_cache.clear()
+    _trafico_cache[clave] = tramos
+    _trafico_cache_bd_guardar(clave, tramos)
+    return tramos
+
+
 def osrm_distancia_duracion(secuencia):
     """secuencia: lista de (lat, lon) en orden de visita. Devuelve (km, minutos_manejo, geometria, tramos_min)
     usando calles reales (OSRM público, sin API key) o None si falla/no hay internet.
@@ -394,15 +576,21 @@ def osrm_distancia_duracion(secuencia):
     return resultado
 
 
-def estimar_ruta(puntos):
+def estimar_ruta(puntos, salida=None, usar_trafico=True):
     """puntos: filas con 'lat'/'lon'. Ida y vuelta desde el depósito, en el orden dado.
-    Usa distancia/tiempo de manejo real por calles (OSRM); si no hay conexión, cae a línea recta."""
+    El tiempo de manejo sale de Google Maps con el tráfico previsto para `salida` (si no se da, la
+    próxima salida de entre semana a las 8:00) cuando hay llave configurada; si no, o si Google no
+    responde, de las calles reales (OSRM) por un factor fijo de tráfico, y sin conexión, de línea
+    recta. OSRM sigue dando la distancia y el dibujo de la ruta. usar_trafico=False sirve para rutas
+    pasadas, que ya no necesitan (ni merecen gastar) una consulta de tráfico."""
     coords = [(p["lat"], p["lon"]) for p in puntos if p["lat"] is not None and p["lon"] is not None]
     if not coords:
         return None
     secuencia = [(DEPOT_LAT, DEPOT_LON)] + coords + [(DEPOT_LAT, DEPOT_LON)]
 
+    salida = salida or salida_por_defecto()
     osrm = osrm_distancia_duracion(secuencia)
+    trafico = _google_tramos(secuencia, salida) if usar_trafico else None
     if osrm:
         distancia_km, minutos_manejo, geometria, _tramos_min = osrm
         minutos_manejo *= FACTOR_TRAFICO
@@ -414,6 +602,9 @@ def estimar_ruta(puntos):
         minutos_manejo = distancia_km / VELOCIDAD_PROMEDIO_KMH * 60
         geometria = None
         fuente = "linea_recta"
+    if trafico is not None:
+        minutos_manejo = sum(trafico)
+        fuente = "trafico"
 
     minutos = minutos_manejo + (len(coords) * MINUTOS_POR_PARADA)
     return {
@@ -423,6 +614,8 @@ def estimar_ruta(puntos):
         "puntos_sin_coords": len(puntos) - len(coords),
         "fuente": fuente,
         "geometria": geometria,
+        "salida_texto": salida.strftime("%d/%m %H:%M") if fuente == "trafico" else None,
+        "trafico_no_disponible": google_maps_configurado() and usar_trafico and fuente != "trafico",
     }
 
 
@@ -586,7 +779,7 @@ def fusionar_grupo_pequeno_con_ruta_vecina(db, grupo):
     for ruta in sorted(candidatas, key=distancia_a_ruta):
         puntos_ruta = puntos_de_ruta(ruta["id"])
         combinado = ordenar_por_cercania(puntos_ruta + grupo)
-        estimado = estimar_ruta(combinado)
+        estimado = estimar_ruta_de(combinado, ruta)
         tope = _tope_efectivo_grupo(combinado, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN)
         if not estimado or estimado["minutos"] > tope:
             continue
@@ -663,13 +856,23 @@ def siguiente_numero_ruta(db):
     return maximo + 1
 
 
+def estimar_ruta_de(puntos, ruta):
+    """estimar_ruta con el día y la hora de salida de esa ruta (ruta: fila con fecha, hora_salida y estado).
+    Una ruta que ya pasó no necesita tráfico (y consultarlo cada vez que se abre el panel solo gastaría)."""
+    if ruta is None:
+        return estimar_ruta(puntos)
+    pasada = ruta["estado"] == "completada" or ruta["fecha"] < ahora_negocio_local().strftime("%Y-%m-%d")
+    return estimar_ruta(puntos, salida=salida_de_ruta(ruta["fecha"], ruta["hora_salida"]), usar_trafico=not pasada)
+
+
 def estimar_ruta_por_id(db, ruta_id):
+    ruta = db.execute("SELECT fecha, hora_salida, estado FROM rutas WHERE id = ?", (ruta_id,)).fetchone()
     filas = db.execute(
         "SELECT s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
         "WHERE p.ruta_id = ? ORDER BY p.orden",
         (ruta_id,),
     ).fetchall()
-    return estimar_ruta(filas)
+    return estimar_ruta_de(filas, ruta)
 
 
 def horario_estimado_siguiente(db, parada_id):
@@ -694,8 +897,12 @@ def horario_estimado_siguiente(db, parada_id):
     ).fetchone()
     origen_lat, origen_lon = (anterior["lat"], anterior["lon"]) if anterior else (DEPOT_LAT, DEPOT_LON)
 
-    osrm = osrm_distancia_duracion([(origen_lat, origen_lon), (parada["lat"], parada["lon"])])
-    if osrm:
+    tramo = [(origen_lat, origen_lon), (parada["lat"], parada["lon"])]
+    trafico = _google_tramos(tramo, ahora_negocio_local())
+    osrm = osrm_distancia_duracion(tramo) if trafico is None else None
+    if trafico is not None:
+        minutos = trafico[0]
+    elif osrm:
         minutos = osrm[1] * FACTOR_TRAFICO
     else:
         minutos = haversine_km(origen_lat, origen_lon, parada["lat"], parada["lon"]) / VELOCIDAD_PROMEDIO_KMH * 60
@@ -727,11 +934,6 @@ def horario_estimado_parada(db, parada_id):
         return None
 
     secuencia = [(DEPOT_LAT, DEPOT_LON)] + [(p["lat"], p["lon"]) for p in con_coords] + [(DEPOT_LAT, DEPOT_LON)]
-    osrm = osrm_distancia_duracion(secuencia)
-    if not osrm:
-        return None
-    _km, _min, _geom, tramos_min = osrm
-
     inicio = None
     if parada["hora_inicio_real"]:
         try:
@@ -739,14 +941,23 @@ def horario_estimado_parada(db, parada_id):
         except ValueError:
             inicio = None
     if inicio is None:
-        try:
-            hora_h, hora_m = (int(x) for x in parada["hora_salida"].split(":"))
-        except (ValueError, AttributeError):
-            hora_h, hora_m = 8, 0
-        inicio = datetime.combine(ahora_negocio().date(), dtime(hora_h, hora_m))
+        inicio = salida_de_ruta(parada["fecha"], parada["hora_salida"])
+    if inicio is None:
+        inicio = datetime.combine(ahora_negocio().date(), dtime(8, 0))
+
+    trafico = _google_tramos(secuencia, inicio)
+    if trafico is not None:
+        tramos_min = trafico
+        factor = 1  # Google ya trae el tráfico de esa hora
+    else:
+        osrm = osrm_distancia_duracion(secuencia)
+        if not osrm:
+            return None
+        tramos_min = osrm[3]
+        factor = FACTOR_TRAFICO
 
     indice = [p["id"] for p in con_coords].index(parada["id"])
-    minutos_acumulados = sum(t * FACTOR_TRAFICO for t in tramos_min[: indice + 1]) + indice * MINUTOS_POR_PARADA
+    minutos_acumulados = sum(t * factor for t in tramos_min[: indice + 1]) + indice * MINUTOS_POR_PARADA
     llegada = inicio + timedelta(minutes=minutos_acumulados)
     salida_de_ahi = llegada + timedelta(minutes=30)
     return f"{llegada.strftime('%-I:%M %p')} – {salida_de_ahi.strftime('%-I:%M %p')}"
@@ -4550,7 +4761,9 @@ def armar_ruta_sugerida(db, semilla_id=None):
     # duración real por calles a los más cercanos que quedaron fuera, por si todavía caben.
     intentos = 0
     for candidato in sorted(rechazados, key=lambda u: dmin[u["id"]]):
-        if intentos >= 10:
+        # Con tráfico real de Google la estimación rápida no es conservadora (se queda corta), así
+        # que no vale la pena gastar una consulta por candidato rechazado.
+        if intentos >= 10 or google_maps_configurado():
             break
         intentos += 1
         prueba = ordenar_por_cercania(grupo + [candidato])
@@ -4568,8 +4781,12 @@ def armar_ruta_sugerida(db, semilla_id=None):
     while len(ordenado) > 1 and estimado and estimado["minutos"] > _tope_efectivo_grupo(
         ordenado, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN
     ):
-        quitar = next(u for u in reversed(grupo) if u is not semilla)
-        grupo.remove(quitar)
+        # Se quitan varias paradas a la vez según cuánto se pasó (no de una en una): con tráfico
+        # real cada estimación es una consulta a Google, y la estimación rápida suele pasarse mucho.
+        tope = _tope_efectivo_grupo(ordenado, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN)
+        cuantas = max(1, math.ceil((estimado["minutos"] - tope) / (estimado["minutos"] / len(ordenado))))
+        for quitar in [u for u in reversed(grupo) if u is not semilla][:cuantas]:
+            grupo.remove(quitar)
         ordenado = ordenar_por_cercania(grupo)
         estimado = estimar_ruta(ordenado)
     return {
@@ -4679,7 +4896,7 @@ def admin_crear_ruta_sugerida(user):
         flash("Alguno de los pacientes ya no está disponible (se programó o cambió). Vuelve a armar la ruta sugerida.", "error")
         return redirect(url_for("admin_ruta_sugerida"))
     grupo = ordenar_por_cercania(fusionar_puntos_mismo_cliente(filas))
-    estimado = estimar_ruta(grupo)
+    estimado = estimar_ruta(grupo, salida=salida_de_ruta(fecha, hora_salida))
     if estimado and estimado["minutos"] > _tope_efectivo_grupo(
         grupo, DURACION_MAXIMA_RUTA_MIN, DURACION_MAXIMA_RUTA_LEJANA_MIN
     ):
@@ -4745,7 +4962,7 @@ def admin_ver_ruta(user, ruta_id):
         (ruta_id,),
     ).fetchall()
     paradas_json = [dict(p) for p in paradas]
-    estimado = estimar_ruta(paradas)
+    estimado = estimar_ruta_de(paradas, ruta)
     tiempo_real = None
     if ruta["hora_inicio_real"]:
         try:
@@ -4789,7 +5006,7 @@ def admin_ver_ruta(user, ruta_id):
                     "SELECT lat, lon FROM solicitudes WHERE id = ?", (confirmar_id,)
                 ).fetchone()
                 puntos_prueba = [dict(p) for p in paradas] + [dict(sol_preview)]
-                estimado_prueba = estimar_ruta(puntos_prueba)
+                estimado_prueba = estimar_ruta_de(puntos_prueba, ruta)
                 aviso_exceso = {
                     "solicitud_id": confirmar_id, "nombre": candidato_preview["nombre"],
                     "duracion": estimado_prueba["duracion"] if estimado_prueba else "desconocida",
@@ -4828,7 +5045,7 @@ def admin_agregar_paciente_ruta(user, ruta_id):
         (ruta_id,),
     ).fetchall()
     puntos_prueba = [dict(p) for p in paradas_actuales] + [{"lat": candidato["lat"], "lon": candidato["lon"]}]
-    estimado_prueba = estimar_ruta(puntos_prueba)
+    estimado_prueba = estimar_ruta_de(puntos_prueba, ruta)
     if estimado_prueba and estimado_prueba["minutos"] > DURACION_MAXIMA_RUTA_MIN and not confirmar_exceso:
         flash(
             f"Agregar a este paciente deja la ruta en {estimado_prueba['duracion']}, por encima del límite de "
@@ -5613,7 +5830,7 @@ def recolector_ver_ruta(user, ruta_id):
         (ruta_id,),
     ).fetchall()
     paradas_json = [dict(p) for p in paradas]
-    estimado = estimar_ruta(paradas)
+    estimado = estimar_ruta_de(paradas, ruta)
     tiempo_real = None
     if ruta["hora_inicio_real"]:
         try:
@@ -5896,7 +6113,7 @@ def intentar_llenar_hueco_ausente(
     disponible. Devuelve la dirección del paciente agregado, o None si no se agregó a
     nadie."""
     ruta = db.execute(
-        "SELECT nombre, estado, hora_inicio_real, hora_fin_real FROM rutas WHERE id = ?", (ruta_id,)
+        "SELECT nombre, fecha, hora_salida, estado, hora_inicio_real, hora_fin_real FROM rutas WHERE id = ?", (ruta_id,)
     ).fetchone()
     # hora_fin_real solo se llena cuando el recolector cierra la ruta explícitamente — a
     # diferencia de 'estado', que puede haber quedado en 'completada' nada más porque ya no
@@ -5937,7 +6154,7 @@ def intentar_llenar_hueco_ausente(
         (ruta_id, excluir_parada_id),
     ).fetchall()
     puntos_prueba = [dict(p) for p in puntos_ruta] + [{"lat": candidato["lat"], "lon": candidato["lon"]}]
-    estimado = estimar_ruta(puntos_prueba)
+    estimado = estimar_ruta_de(puntos_prueba, ruta)
     if estimado and estimado["minutos"] > DURACION_MAXIMA_RUTA_MIN:
         return None
 

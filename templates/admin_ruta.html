@@ -28,6 +28,7 @@
   <p style="color:var(--muted); font-size:0.88rem;">
     Tiempo estimado ida y vuelta desde Filiberto Gómez 279: <strong>{{ estimado['duracion'] }}</strong>
     ({{ estimado['distancia_km'] }} km{% if estimado['puntos_sin_coords'] %}, {{ estimado['puntos_sin_coords'] }} parada(s) sin coordenadas no incluida(s){% endif %})
+    {% if estimado['fuente'] == 'trafico' %}<br><em>Con el tráfico previsto para la salida del {{ estimado['salida_texto'] }}.</em>{% elif estimado['trafico_no_disponible'] %}<br><em>No se pudo consultar el tráfico real — estimado aproximado, puede quedarse corto.</em>{% endif %}
     {% if estimado['fuente'] == 'linea_recta' %}<br><em>Sin conexión al servicio de rutas — estimado en línea recta, puede quedarse corto.</em>{% endif %}
   </p>
   {% endif %}
