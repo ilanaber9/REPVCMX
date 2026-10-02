@@ -202,6 +202,7 @@ CREATE TABLE horas_extra (
   hora_salida TEXT NOT NULL,
   horas_trabajadas REAL NOT NULL,
   horas_extra REAL NOT NULL,
+  pagado_en TEXT,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 

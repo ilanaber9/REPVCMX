@@ -1737,9 +1737,13 @@ def aplicar_migraciones_pendientes():
             "  hora_salida TEXT NOT NULL,"
             "  horas_trabajadas REAL NOT NULL,"
             "  horas_extra REAL NOT NULL,"
+            "  pagado_en TEXT,"
             "  created_at TEXT DEFAULT (datetime('now','localtime'))"
             ")"
         )
+    elif "pagado_en" not in {r["name"] for r in db.execute("PRAGMA table_info(horas_extra)")}:
+        # Cuándo se le pagó ese registro (NULL = todavía se le debe) -- ver admin_pagar_horas_extra.
+        db.execute("ALTER TABLE horas_extra ADD COLUMN pagado_en TEXT")
 
     if "avisos_programados" not in tablas:
         db.execute(
@@ -3193,7 +3197,10 @@ def admin_dashboard(user):
         "JOIN users u ON u.id = h.recolector_id ORDER BY h.fecha DESC, h.hora_inicio DESC"
     ).fetchall()
     horas_extra_por_recolector = db.execute(
-        "SELECT u.name AS recolector_nombre, COALESCE(SUM(h.horas_extra), 0) AS total "
+        "SELECT u.id AS recolector_id, u.name AS recolector_nombre, "
+        "COALESCE(SUM(CASE WHEN h.pagado_en IS NULL THEN h.horas_extra END), 0) AS por_pagar, "
+        "COALESCE(SUM(CASE WHEN h.pagado_en IS NOT NULL THEN h.horas_extra END), 0) AS pagado, "
+        "MAX(CASE WHEN h.pagado_en IS NULL THEN h.id END) AS hasta_id "
         "FROM users u LEFT JOIN horas_extra h ON h.recolector_id = u.id "
         "WHERE u.role = 'recolector' GROUP BY u.id ORDER BY u.name"
     ).fetchall()
@@ -5506,11 +5513,51 @@ def recolector_dashboard(user):
         "SELECT * FROM horas_extra WHERE recolector_id = ? ORDER BY fecha DESC, hora_inicio DESC",
         (user["id"],),
     ).fetchall()
-    horas_extra_total = sum(r["horas_extra"] for r in horas_extra_registros)
+    horas_extra_total = sum(r["horas_extra"] for r in horas_extra_registros if not r["pagado_en"])
     return render_template(
         "recolector_dashboard.html", rutas=rutas, hoy=ahora_negocio().date().isoformat(),
         horas_extra_registros=horas_extra_registros, horas_extra_total=horas_extra_total,
     )
+
+
+@app.route("/admin/horas-extra/<int:recolector_id>/pagar", methods=["POST"])
+@login_required("admin")
+def admin_pagar_horas_extra(user, recolector_id):
+    """Marca como pagadas las horas extra que se le debían a un recolector (el pago es cada 15
+    días). Solo cuenta lo registrado hasta el momento en que el admin vio la pantalla (hasta_id),
+    para que unas horas que el recolector registre justo entre que se abrió la pantalla y se
+    presionó el botón no queden pagadas sin que nadie las haya visto. El recolector ve el cambio
+    de inmediato porque lo lee de aquí mismo."""
+    if not user["es_admin_general"]:
+        flash("Solo el administrador general puede registrar pagos de horas extra.", "error")
+        return redirect(url_for("admin_dashboard", tab="horas_extra"))
+    db = get_db()
+    recolector = db.execute(
+        "SELECT name FROM users WHERE id = ? AND role = 'recolector'", (recolector_id,)
+    ).fetchone()
+    hasta_id = request.form.get("hasta_id", type=int)
+    if recolector is None or not hasta_id:
+        flash("No se pudo registrar el pago. Recarga la pantalla e inténtalo de nuevo.", "error")
+        return redirect(url_for("admin_dashboard", tab="horas_extra"))
+    pendiente = db.execute(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(horas_extra), 0) AS horas FROM horas_extra "
+        "WHERE recolector_id = ? AND pagado_en IS NULL AND id <= ?",
+        (recolector_id, hasta_id),
+    ).fetchone()
+    if pendiente["n"] == 0:
+        flash(f"A {recolector['name']} no se le debían horas extra (puede que ya se hayan marcado como pagadas).", "error")
+        return redirect(url_for("admin_dashboard", tab="horas_extra"))
+    db.execute(
+        "UPDATE horas_extra SET pagado_en = ? WHERE recolector_id = ? AND pagado_en IS NULL AND id <= ?",
+        (ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S"), recolector_id, hasta_id),
+    )
+    db.commit()
+    flash(
+        f"Se marcaron como pagadas {pendiente['horas']:.1f} horas extra de {recolector['name']}. "
+        "Ya le aparecen como pagadas en su cuenta.",
+        "success",
+    )
+    return redirect(url_for("admin_dashboard", tab="horas_extra"))
 
 
 @app.route("/recolector/horas-extra", methods=["POST"])

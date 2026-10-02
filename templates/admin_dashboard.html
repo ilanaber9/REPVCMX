@@ -1506,14 +1506,28 @@
   <div class="subtab-panel" data-subtab="horas_extra">
   <div class="card">
     <h1 style="margin:0;">Horas extra</h1>
-    <p style="color:var(--muted); font-size:0.9rem;">Horas extra registradas por cada recolector (jornada normal: 8h/día).</p>
+    <p style="color:var(--muted); font-size:0.9rem;">
+      Horas extra registradas por cada recolector (jornada normal: 8h/día). El total es solo lo que
+      se les debe; al pagarles cada 15 días, presiona "Marcar como pagadas" y a ellos les aparece
+      como pagado al momento.
+    </p>
     <div class="table-scroll">
     <table style="min-width:auto;">
-      <tr><th>Recolector</th><th>Total horas extra</th></tr>
+      <tr><th>Recolector</th><th>Horas por pagar</th><th>Ya pagadas</th><th></th></tr>
       {% for r in horas_extra_por_recolector %}
       <tr>
         <td>{{ r['recolector_nombre'] }}</td>
-        <td><strong>{{ "%.1f"|format(r['total']) }}</strong></td>
+        <td><strong>{{ "%.1f"|format(r['por_pagar']) }}</strong></td>
+        <td style="color:var(--muted);">{{ "%.1f"|format(r['pagado']) }}</td>
+        <td>
+          {% if r['por_pagar'] > 0 %}
+          <form method="post" action="{{ url_for('admin_pagar_horas_extra', recolector_id=r['recolector_id']) }}"
+                onsubmit="return confirm('¿Marcar como pagadas {{ "%.1f"|format(r['por_pagar']) }} horas extra de este recolector? Le aparecerán como pagadas en su cuenta.');">
+            <input type="hidden" name="hasta_id" value="{{ r['hasta_id'] }}">
+            <button type="submit" class="small">Marcar como pagadas</button>
+          </form>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </table>
@@ -1524,7 +1538,7 @@
     <h2 style="margin-top:0;">Historial</h2>
     {% if horas_extra_registros %}
     <table>
-      <tr><th>Recolector</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas trabajadas</th><th>Horas extra</th></tr>
+      <tr><th>Recolector</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas trabajadas</th><th>Horas extra</th><th>Pago</th></tr>
       {% for h in horas_extra_registros %}
       <tr>
         <td>{{ h['recolector_nombre'] }}</td>
@@ -1533,6 +1547,7 @@
         <td>{{ h['hora_salida'] }}</td>
         <td>{{ "%.1f"|format(h['horas_trabajadas']) }}</td>
         <td>{{ "%.1f"|format(h['horas_extra']) }}</td>
+        <td>{% if h['pagado_en'] %}<span class="badge entregado">Pagada el {{ h['pagado_en'][:10] }}</span>{% else %}<span class="badge pendiente">Por pagar</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </table>

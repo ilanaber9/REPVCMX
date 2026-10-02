@@ -49,11 +49,12 @@
   <div class="card" style="margin-top:16px;">
     <h1 style="margin:0;">Mi historial</h1>
     <p style="color:var(--muted); font-size:0.9rem;">
-      Total de horas extra acumuladas: <strong>{{ "%.1f"|format(horas_extra_total) }}</strong>
+      Horas extra por pagar: <strong>{{ "%.1f"|format(horas_extra_total) }}</strong>
+      <span style="display:block; font-size:0.8rem;">Las que ya te pagaron aparecen abajo como pagadas y no se cuentan aquí.</span>
     </p>
     {% if horas_extra_registros %}
     <table>
-      <tr><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas trabajadas</th><th>Horas extra</th></tr>
+      <tr><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas trabajadas</th><th>Horas extra</th><th>Pago</th></tr>
       {% for h in horas_extra_registros %}
       <tr>
         <td>{{ h['fecha'] }}</td>
@@ -61,6 +62,7 @@
         <td>{{ h['hora_salida'] }}</td>
         <td>{{ "%.1f"|format(h['horas_trabajadas']) }}</td>
         <td>{{ "%.1f"|format(h['horas_extra']) }}</td>
+        <td>{% if h['pagado_en'] %}<span class="badge entregado">Pagada el {{ h['pagado_en'][:10] }}</span>{% else %}<span class="badge pendiente">Por pagar</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </table>
