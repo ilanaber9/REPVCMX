@@ -183,7 +183,7 @@
     <h2 style="margin-top:24px;">Pendientes de entrega (botes / material)</h2>
     {% if pendientes_entrega %}
     <table>
-      <tr><th>Paciente</th><th>Dirección</th><th>Solicitud</th><th>Modalidad</th><th>Ruta</th><th></th></tr>
+      <tr><th>Paciente</th><th>Dirección</th><th>Solicitud</th><th>Modalidad</th><th></th></tr>
       {% for s in pendientes_entrega %}
       <tr>
         <td>{{ s['cliente_nombre'] }}</td>
@@ -193,11 +193,8 @@
           {% else %}<span class="badge programada">Bote nuevo</span>{% endif %}
         </td>
         <td>{{ 'Compra' if s['modalidad'] == 'compra' else 'Donación' if s['modalidad'] == 'donacion' else '—' }}</td>
-        <td>{{ s['zona'] or 'Sin asignar' }}</td>
         <td>
-          {% if s['ruta_programada'] %}
-          <span class="badge pendiente">En ruta "{{ s['ruta_programada'] }}" — falta que el recolector confirme la entrega</span>
-          {% else %}
+          {% if not s['ruta_programada'] %}
           <form method="post" action="{{ url_for('admin_marcar_bote_entregado', solicitud_id=s['id']) }}">
             <button type="submit" class="small secondary">Marcar bote entregado</button>
           </form>

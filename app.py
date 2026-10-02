@@ -2933,7 +2933,7 @@ def admin_dashboard(user):
         "    SELECT 1 FROM paradas p WHERE (p.solicitud_id = s.id OR p.solicitud_extra_id = s.id) "
         "    AND p.tipo = 'entrega' AND p.estado = 'pendiente'"
         "  ))"
-        ") ORDER BY s.zona IS NULL, s.zona, s.created_at"
+        ") ORDER BY s.created_at"
     ).fetchall()
 
     rutas_rows = db.execute(
