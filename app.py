@@ -1980,7 +1980,7 @@ def login():
             user = db.execute(
                 "SELECT * FROM users WHERE telefono = ? AND role = 'cliente'", (telefono,)
             ).fetchone()
-            error_no_existe = "Ese número de WhatsApp no está registrado."
+            error_no_existe = "Tu número no está registrado."
         else:
             user = user_personal
             error_no_existe = "Ese correo o teléfono no está registrado."
@@ -1990,7 +1990,7 @@ def login():
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         if not check_password_hash(user["password_hash"], password):
             registrar_intento_login(db, identidad, exitoso=False)
-            error_password = "Número de WhatsApp o contraseña incorrectos." if tipo == "cliente" else "Correo, teléfono o contraseña incorrectos."
+            error_password = "Contraseña incorrecta." if tipo == "cliente" else "Correo, teléfono o contraseña incorrectos."
             flash(error_password, "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         if tipo and TIPO_LOGIN_ROLES.get(tipo) != user["role"]:
