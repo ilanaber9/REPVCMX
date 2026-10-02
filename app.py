@@ -226,7 +226,7 @@ MAX_INTENTOS_CODIGO_TELEFONO = 5  # intentos fallidos antes de pedir un código 
 DURACION_MAXIMA_RUTA_MIN = 7 * 60 + 30  # 7:30 hrs por ruta antes de dividirla en otra
 MIN_PARADAS_DESPACHO = 8  # piso real: por debajo de esto no es rentable mandar la camioneta sola
 # por esa tanda. Si una tanda queda por debajo, primero se intenta fusionar con la ruta planificada más cercana
-# (de cualquier zona, ver fusionar_grupo_pequeno_con_ruta_vecina); si no cabe en ninguna, esos
+# (ver fusionar_grupo_pequeno_con_ruta_vecina); si no cabe en ninguna, esos
 # pacientes se quedan pendientes para la siguiente corrida —salvo el caso de un paciente aislado
 # y lejano sin ninguna ruta cercana, que en vez de quedar esperando en silencio le avisa al admin
 # (ver intentar_despachar_grupo_pequeno) para que decida si vale la pena mandar la camioneta.
@@ -553,7 +553,7 @@ def _centroide(puntos):
 
 def fusionar_grupo_pequeno_con_ruta_vecina(db, grupo):
     """grupo quedó por debajo de MIN_PARADAS_DESPACHO. Busca, entre las rutas ya planificadas y
-    sin iniciar (de cualquier zona), la más cercana geográficamente a este grupo donde quepan
+    sin iniciar, la más cercana geográficamente a este grupo donde quepan
     estos pacientes sin pasar el tope de duración que le corresponda a esa ruta combinada. Si
     encuentra una, agrega ahí las paradas (reordenadas por cercanía) y regresa la lista de ids de
     las paradas nuevas (las de este grupo; las que ya tenía la ruta no cambian). Si ninguna tiene
@@ -600,12 +600,9 @@ def fusionar_grupo_pequeno_con_ruta_vecina(db, grupo):
             )
             if p["id"] in ids_del_grupo:
                 parada_ids_nuevas.append(cur_parada.lastrowid)
-            db.execute("UPDATE solicitudes SET estado = 'programada', zona = ? WHERE id = ?", (ruta["zona"], p["id"]))
+            db.execute("UPDATE solicitudes SET estado = 'programada' WHERE id = ?", (p["id"],))
             if p.get("extra_id"):
-                db.execute(
-                    "UPDATE solicitudes SET estado = 'programada', zona = ? WHERE id = ?",
-                    (ruta["zona"], p["extra_id"]),
-                )
+                db.execute("UPDATE solicitudes SET estado = 'programada' WHERE id = ?", (p["extra_id"],))
         return parada_ids_nuevas
     return None
 
@@ -653,11 +650,10 @@ def intentar_despachar_grupo_pequeno(db, grupo):
 
 def siguiente_numero_ruta(db):
     """Siguiente número consecutivo libre para nombrar una ruta como 'Ruta NN (...)', tomando
-    el máximo usado tanto en zonas importadas como en nombres de rutas ya creadas."""
+    el máximo usado tanto en los puntos de referencia importados como en nombres de rutas ya creadas."""
     maximo = 0
     filas = db.execute(
-        "SELECT zona AS nombre FROM solicitudes WHERE zona IS NOT NULL "
-        "UNION SELECT nombre FROM rutas UNION SELECT zona AS nombre FROM zonas_referencia"
+        "SELECT nombre FROM rutas UNION SELECT zona AS nombre FROM zonas_referencia"
     ).fetchall()
     for f in filas:
         m = re.match(r"Ruta (\d+)", f["nombre"] or "")
@@ -1445,14 +1441,15 @@ LIMITE_MINUTOS_COBERTURA = 20
 
 
 def fuera_de_cobertura(db, lat, lon):
-    """True si no hay ningún punto ya cubierto (con zona asignada, ya sea una solicitud real de
-    hoy o un punto de referencia guardado en zonas_referencia) a menos de LIMITE_MINUTOS_COBERTURA
-    minutos de manejo real desde (lat, lon). Si todavía no hay ningún punto con zona en el sistema
+    """True si no hay ningún punto ya cubierto (una solicitud real que ya haya estado en una ruta,
+    o un punto de referencia guardado en zonas_referencia) a menos de LIMITE_MINUTOS_COBERTURA
+    minutos de manejo real desde (lat, lon). Si todavía no hay ningún punto cubierto en el sistema
     (arranque en frío, p. ej. justo después de vaciar la base de datos), se compara contra el
-    depósito en su lugar — así la primera zona que se cree de forma automática sigue respetando un
-    radio real de cobertura, en vez de aceptar cualquier lugar."""
+    depósito en su lugar — así la primera ruta que se cree sigue respetando un radio real de
+    cobertura, en vez de aceptar cualquier lugar."""
     filas = db.execute(
-        "SELECT lat, lon FROM solicitudes WHERE zona IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL "
+        "SELECT s.lat, s.lon FROM solicitudes s WHERE s.lat IS NOT NULL AND s.lon IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM paradas p WHERE p.solicitud_id = s.id OR p.solicitud_extra_id = s.id) "
         "UNION ALL SELECT lat, lon FROM zonas_referencia"
     ).fetchall()
     if not filas:
@@ -2751,31 +2748,30 @@ def cliente_nueva_solicitud(user):
     estado_inicial = "pendiente_entrega" if tipo == "material" else "pendiente"
     db = get_db()
     alta = db.execute(
-        "SELECT direccion, lat, lon, zona FROM solicitudes WHERE cliente_id = ? AND lat IS NOT NULL "
+        "SELECT direccion, lat, lon FROM solicitudes WHERE cliente_id = ? AND lat IS NOT NULL "
         "ORDER BY created_at DESC LIMIT 1",
         (user["id"],),
     ).fetchone()
     if alta is None:
         alta = db.execute(
-            "SELECT direccion, lat, lon, zona FROM solicitudes WHERE cliente_id = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT direccion, lat, lon FROM solicitudes WHERE cliente_id = ? ORDER BY created_at DESC LIMIT 1",
             (user["id"],),
         ).fetchone()
     direccion = alta["direccion"] if alta else ""
     if recoger_en_sitio:
-        lat = lon = zona = None
+        lat = lon = None
     else:
         lat = alta["lat"] if alta else None
         lon = alta["lon"] if alta else None
-        zona = alta["zona"] if alta else None
     hay_existencia = False
     if tipo == "material" and cantidad_cajas:
         hay_existencia = existencia_caja(db, material) >= cantidad_cajas
 
     cur = db.execute(
         "INSERT INTO solicitudes (cliente_id, direccion, material, notas, cantidad_cajas, "
-        "tipo_redistribucion, lat, lon, zona, estado, recoger_en_sitio, confirmado_existencia) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (user["id"], direccion, material, notas, cantidad_cajas, tipo, lat, lon, zona, estado_inicial,
+        "tipo_redistribucion, lat, lon, estado, recoger_en_sitio, confirmado_existencia) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (user["id"], direccion, material, notas, cantidad_cajas, tipo, lat, lon, estado_inicial,
          1 if recoger_en_sitio else 0, 1 if hay_existencia else 0),
     )
     nueva_solicitud_id = cur.lastrowid
@@ -3116,12 +3112,9 @@ def admin_dashboard(user):
     for p in pacientes_rows:
         paciente = dict(p)
         ruta_sol = db.execute(
-            "SELECT s.id AS solicitud_id, s.zona, s.direccion, s.telefono, s.modalidad, s.estado, "
-            "s.bote_a_devolver, r.nombre AS ruta_nombre FROM solicitudes s "
-            "LEFT JOIN paradas pa ON pa.solicitud_id = s.id "
-            "LEFT JOIN rutas r ON r.id = pa.ruta_id "
-            "WHERE s.cliente_id = ? "
-            "ORDER BY (r.nombre IS NULL), (s.zona IS NULL), s.created_at DESC, pa.id DESC LIMIT 1",
+            "SELECT id AS solicitud_id, direccion, telefono, modalidad, estado, bote_a_devolver "
+            "FROM solicitudes WHERE cliente_id = ? "
+            "ORDER BY (tipo_redistribucion IS NOT NULL), created_at DESC LIMIT 1",
             (p["id"],),
         ).fetchone()
         paciente["direccion_actual"] = ruta_sol["direccion"] if ruta_sol else None
@@ -3351,7 +3344,7 @@ def admin_dashboard(user):
         "AND (s.lat IS NULL OR s.lon IS NULL) ORDER BY s.created_at"
     ).fetchall()
     auditoria_programada_sin_ruta = db.execute(
-        "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, s.zona, s.estado "
+        "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, s.estado "
         "FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
         "WHERE s.estado = 'programada' AND NOT EXISTS ("
         "  SELECT 1 FROM paradas p JOIN rutas r ON r.id = p.ruta_id "
@@ -3361,7 +3354,7 @@ def admin_dashboard(user):
     total_auditoria_rutas = len(auditoria_sin_coordenadas) + len(auditoria_programada_sin_ruta)
 
     pacientes_prueba = db.execute(
-        "SELECT id, nombre_contacto, direccion, zona, estado FROM solicitudes "
+        "SELECT id, nombre_contacto, direccion, estado FROM solicitudes "
         "WHERE nombre_contacto LIKE 'Prueba %' ORDER BY id"
     ).fetchall()
 
@@ -3617,7 +3610,7 @@ def admin_mapa(user):
         "SELECT s.*, COALESCE(u.name, s.nombre_contacto) AS cliente_nombre FROM solicitudes s "
         "LEFT JOIN users u ON u.id = s.cliente_id "
         "WHERE s.lat IS NOT NULL AND s.lon IS NOT NULL AND s.estado != 'cancelada' "
-        "ORDER BY s.zona, s.id"
+        "ORDER BY s.id"
     ).fetchall()
     puntos_json = [dict(p) for p in puntos]
     return render_template("admin_mapa.html", puntos=puntos, puntos_json=puntos_json)
@@ -4599,8 +4592,8 @@ def admin_crear_ruta_sugerida(user):
     km = estimado["distancia_km"] if estimado else 0
     nombre_ruta = f"Ruta {siguiente_numero_ruta(db):02d} ({km} km)"
     cur = db.execute(
-        "INSERT INTO rutas (nombre, zona, fecha, hora_salida, recolector_id) VALUES (?, ?, ?, ?, ?)",
-        (nombre_ruta, nombre_ruta, fecha, hora_salida, recolector_id),
+        "INSERT INTO rutas (nombre, fecha, hora_salida, recolector_id) VALUES (?, ?, ?, ?)",
+        (nombre_ruta, fecha, hora_salida, recolector_id),
     )
     ruta_id = cur.lastrowid
     parada_ids = []
@@ -4613,7 +4606,7 @@ def admin_crear_ruta_sugerida(user):
         parada_ids.append(cur_parada.lastrowid)
         for sid in (p["id"], p.get("extra_id")):
             if sid:
-                db.execute("UPDATE solicitudes SET estado = 'programada', zona = ? WHERE id = ?", (nombre_ruta, sid))
+                db.execute("UPDATE solicitudes SET estado = 'programada' WHERE id = ?", (sid,))
     db.commit()
     threading.Thread(target=_notificar_paradas_programadas, args=(parada_ids,), daemon=True).start()
     flash(f"'{nombre_ruta}' creada con {len(grupo)} parada(s). A cada paciente le llega su aviso por WhatsApp.", "success")
@@ -4664,12 +4657,12 @@ def admin_ver_ruta(user, ruta_id):
             ids_en_ruta.add(p["solicitud_id"])
             if p["solicitud_extra_id"]:
                 ids_en_ruta.add(p["solicitud_extra_id"])
-        # Cualquier paciente inscrito con una solicitud pendiente, no solo los de la misma zona que
-        # la ruta — el admin puede necesitar agregar a alguien puntual aunque su zona registrada no
-        # coincida; el aviso de exceso de 7:30 ya protege contra meter a alguien demasiado lejos.
+        # Cualquier paciente inscrito con una solicitud pendiente — el admin puede necesitar
+        # agregar a alguien puntual; el aviso de exceso de 7:30 ya protege contra meter a alguien
+        # demasiado lejos.
         candidatos = db.execute(
             "SELECT s.id, COALESCE(u.name, s.nombre_contacto) AS nombre, s.direccion, "
-            "COALESCE(u.telefono, s.telefono) AS telefono, s.zona "
+            "COALESCE(u.telefono, s.telefono) AS telefono "
             "FROM solicitudes s LEFT JOIN users u ON u.id = s.cliente_id "
             "WHERE s.estado IN ('pendiente', 'pendiente_entrega') "
             f"AND {condicion_lista_para_recoleccion('s')} ORDER BY nombre",
@@ -5158,9 +5151,9 @@ def admin_generar_pacientes_prueba(user):
     db = get_db()
     for i, p in enumerate(muestra, start=1):
         db.execute(
-            "INSERT INTO solicitudes (nombre_contacto, direccion, material, lat, lon, zona, estado) "
-            "VALUES (?, ?, 'PVC', ?, ?, ?, 'pendiente')",
-            (f"Prueba {i}", f"{p['direccion']} (prueba)", p["lat"], p["lon"], p["zona"]),
+            "INSERT INTO solicitudes (nombre_contacto, direccion, material, lat, lon, estado) "
+            "VALUES (?, ?, 'PVC', ?, ?, 'pendiente')",
+            (f"Prueba {i}", f"{p['direccion']} (prueba)", p["lat"], p["lon"]),
         )
     db.commit()
     flash(f"Se generaron {cantidad} pacientes de prueba (\"Prueba 1\" a \"Prueba {cantidad}\").", "success")
@@ -5210,10 +5203,8 @@ def admin_exportar_pacientes(user):
     filas = []
     for p in pacientes_rows:
         ruta_sol = db.execute(
-            "SELECT s.zona, s.direccion, s.telefono, s.modalidad, r.nombre AS ruta_nombre "
-            "FROM solicitudes s LEFT JOIN paradas pa ON pa.solicitud_id = s.id "
-            "LEFT JOIN rutas r ON r.id = pa.ruta_id WHERE s.cliente_id = ? "
-            "ORDER BY (r.nombre IS NULL), (s.zona IS NULL), s.created_at DESC, pa.id DESC LIMIT 1",
+            "SELECT direccion, telefono, modalidad FROM solicitudes WHERE cliente_id = ? "
+            "ORDER BY (tipo_redistribucion IS NOT NULL), created_at DESC LIMIT 1",
             (p["id"],),
         ).fetchone()
         ultima_visita = db.execute(
@@ -5231,7 +5222,6 @@ def admin_exportar_pacientes(user):
             p["frecuencia_semana"] or "—",
             CAUSA_ENFERMEDAD_LABELS.get(p["causa_enfermedad"], "—"),
             (ruta_sol["direccion"] if ruta_sol else None) or "—",
-            (ruta_sol["ruta_nombre"] or ruta_sol["zona"]) if ruta_sol else "—",
             "Compra" if (ruta_sol and ruta_sol["modalidad"]) == "compra"
             else "Donación" if (ruta_sol and ruta_sol["modalidad"]) == "donacion" else "—",
             ultima_visita["fecha"] if ultima_visita else "Aún no visitado",
@@ -5243,7 +5233,7 @@ def admin_exportar_pacientes(user):
     agregar_hoja_excel(
         wb, "Pacientes",
         ["Nombre", "WhatsApp", "Edad", "Tipo", "Marca", "Frecuencia/semana", "Causa", "Dirección",
-         "Zona/Ruta", "Modalidad", "Última visita", "Material recolectado (kg)", "Estado"],
+         "Modalidad", "Última visita", "Material recolectado (kg)", "Estado"],
         filas,
     )
     return respuesta_excel(wb, f"pacientes_{ahora_negocio().date().isoformat()}.xlsx")
@@ -5740,7 +5730,7 @@ def intentar_llenar_hueco_ausente(
     """Cuando una parada queda 'ausente' —el recolector no encontró a nadie, o el paciente avisó
     de antemano en la plataforma que no va a poder recibir la recolección (en cuyo caso esa
     parada ya se eliminó y solo llega su ubicación, no su id)— revisa si añadir una parada más
-    sigue cabiendo dentro de DURACION_MAXIMA_RUTA_MIN y, si es así, busca en la misma zona al
+    sigue cabiendo dentro de DURACION_MAXIMA_RUTA_MIN y, si es así, busca entre los pendientes al
     paciente pendiente más cercano a esa dirección (que ya le toque recolección, y que no esté ya
     en esta ruta) y lo agrega, para no desperdiciar el hueco que dejó. excluir_parada_id se usa
     solo cuando la parada ausente TODAVÍA existe en la ruta (el caso del recolector) para no
@@ -5751,15 +5741,15 @@ def intentar_llenar_hueco_ausente(
     TODAS sus paradas por cercanía real para intercalar la nueva en la posición que le
     corresponde; si ya está en curso, la agrega al final para no reordenar paradas ya resueltas.
     No hace nada si la ruta ya terminó, no hay margen de tiempo, o no hay ningún candidato
-    disponible en la zona. Devuelve la dirección del paciente agregado, o None si no se agregó a
+    disponible. Devuelve la dirección del paciente agregado, o None si no se agregó a
     nadie."""
     ruta = db.execute(
-        "SELECT nombre, zona, estado, hora_inicio_real, hora_fin_real FROM rutas WHERE id = ?", (ruta_id,)
+        "SELECT nombre, estado, hora_inicio_real, hora_fin_real FROM rutas WHERE id = ?", (ruta_id,)
     ).fetchone()
     # hora_fin_real solo se llena cuando el recolector cierra la ruta explícitamente — a
     # diferencia de 'estado', que puede haber quedado en 'completada' nada más porque ya no
     # quedaban paradas pendientes en ese momento, sin que la ruta esté realmente cerrada.
-    if ruta is None or ruta["hora_fin_real"] is not None or not ruta["zona"]:
+    if ruta is None or ruta["hora_fin_real"] is not None:
         return None
     if lat_ausente is None or lon_ausente is None:
         return None
@@ -5776,11 +5766,7 @@ def intentar_llenar_hueco_ausente(
         ids_en_ruta.add(solicitud_id_ausente)
 
     # Busca candidatos por cercanía real a la parada que se quedó vacía, en todo el pool de
-    # pendientes -- igual que armar_ruta_sugerida, sin filtrar por zona. Antes se exigía
-    # solicitudes.zona = ruta.zona, pero desde que se quitaron las rutas por zona fija ese campo
-    # solo guarda el NOMBRE de la ruta a la que ya perteneció una solicitud -- como cada ruta
-    # nueva tiene un nombre único, esa comparación casi nunca encontraba a nadie, aunque hubiera
-    # pacientes pendientes cerca.
+    # pendientes -- igual que armar_ruta_sugerida.
     candidatos = db.execute(
         "SELECT id, estado, lat, lon, direccion FROM solicitudes WHERE "
         "estado IN ('pendiente', 'pendiente_entrega') "
@@ -5837,13 +5823,7 @@ def intentar_llenar_hueco_ausente(
         if ruta["estado"] != "en_curso":
             db.execute("UPDATE rutas SET estado = 'en_curso' WHERE id = ?", (ruta_id,))
 
-    # Deja la zona del paciente agregado igual a la de la ruta real donde quedó su parada —así
-    # la lista de pacientes y cualquier futuro "generar rutas" lo reconocen en su ruta real en
-    # vez de la que tenía antes de agregarse aquí.
-    db.execute(
-        "UPDATE solicitudes SET estado = 'programada', zona = ? WHERE id = ?",
-        (ruta["zona"], candidato["id"]),
-    )
+    db.execute("UPDATE solicitudes SET estado = 'programada' WHERE id = ?", (candidato["id"],))
     db.commit()
     threading.Thread(
         target=_notificar_paradas_programadas, args=([cur.lastrowid],), daemon=True

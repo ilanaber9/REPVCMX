@@ -55,7 +55,7 @@
       <select name="solicitud_id" id="select-candidato" required size="6" style="margin-top:6px;">
         {% for c in candidatos %}
         <option value="{{ c['id'] }}" data-buscar="{{ (c['nombre'] ~ ' ' ~ (c['telefono'] or '')) | lower }}">
-          {{ c['nombre'] }}{% if c['telefono'] %} — {{ c['telefono'] }}{% endif %} — {{ c['direccion'] }}{% if c['zona'] %} ({{ c['zona'] }}){% else %} (sin zona){% endif %}
+          {{ c['nombre'] }}{% if c['telefono'] %} — {{ c['telefono'] }}{% endif %} — {{ c['direccion'] }}
         </option>
         {% endfor %}
       </select>

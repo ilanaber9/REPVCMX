@@ -38,7 +38,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 const markers = puntos.map(p => L.circleMarker([p.lat, p.lon], {
   radius: 6, color: colores[p.estado] || '#666', fillColor: colores[p.estado] || '#666', fillOpacity: 0.85, weight: 1
-}).bindPopup(`<strong>${p.cliente_nombre}</strong><br>${p.direccion}<br>${p.material} · ${p.estado}${p.zona ? '<br><em>' + p.zona + '</em>' : ''}`));
+}).bindPopup(`<strong>${p.cliente_nombre}</strong><br>${p.direccion}<br>${p.material} · ${p.estado}`));
 
 if (markers.length) {
   const group = L.featureGroup(markers).addTo(map);

@@ -237,12 +237,11 @@
     </p>
     <div class="table-scroll" style="margin-top:10px; max-height:320px; overflow-y:auto;">
     <table style="min-width:auto;">
-      <tr><th>Nombre</th><th>Dirección</th><th>Zona</th><th>Estado</th></tr>
+      <tr><th>Nombre</th><th>Dirección</th><th>Estado</th></tr>
       {% for p in pacientes_prueba %}
       <tr>
         <td>{{ p['nombre_contacto'] }}</td>
         <td>{{ p['direccion'] }}</td>
-        <td>{{ p['zona'] }}</td>
         <td><span class="badge {{ p['estado'] }}">{{ ESTADO_LABELS.get(p['estado'], p['estado']) }}</span></td>
       </tr>
       {% endfor %}
@@ -288,12 +287,11 @@
     </p>
     {% if auditoria_programada_sin_ruta %}
     <table>
-      <tr><th>Paciente</th><th>Dirección</th><th>Zona</th></tr>
+      <tr><th>Paciente</th><th>Dirección</th></tr>
       {% for s in auditoria_programada_sin_ruta %}
       <tr>
         <td>{{ s['nombre'] }}</td>
         <td>{{ s['direccion'] }}</td>
-        <td>{{ s['zona'] or '—' }}</td>
       </tr>
       {% endfor %}
     </table>
