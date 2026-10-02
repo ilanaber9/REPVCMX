@@ -58,6 +58,25 @@
       </div>
     </div>
 
+    <div style="margin-top:16px; border-top:1px solid var(--border); padding-top:14px;">
+      <p style="margin:0 0 6px; font-weight:600;">
+        ¿Tu número de WhatsApp ({{ current_user['telefono'] }}) es el mismo teléfono con el que te pueden llamar?
+      </p>
+      <p style="color:var(--muted); font-size:0.85rem; margin:0 0 8px;">
+        Si el recolector no te encuentra en tu domicilio, te llamará a ese número.
+      </p>
+      <label style="display:flex; align-items:center; gap:8px; margin:4px 0;">
+        <input type="radio" name="mismo_telefono" value="si" required style="width:auto; margin:0;"> Sí, es el mismo
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin:4px 0;">
+        <input type="radio" name="mismo_telefono" value="no" style="width:auto; margin:0;"> No, me pueden llamar a otro número
+      </label>
+      <div id="bloque-telefono-llamadas" style="display:none; margin-top:8px;">
+        <label>Teléfono para llamarte (10 dígitos)</label>
+        <input type="tel" id="telefono-llamadas" name="telefono_llamadas" maxlength="14" pattern="[0-9 ]{10,14}" inputmode="numeric" placeholder="55 1234 5678" style="max-width:220px;">
+      </div>
+    </div>
+
     <button type="button" id="btn-terminar-registro">Terminar registro</button>
   </form>
 
@@ -66,7 +85,8 @@
     <p style="color:var(--muted); font-size:0.9rem;">Revisa que estos datos sean correctos antes de continuar:</p>
     <p style="line-height:1.8;">
       <strong>Dirección:</strong> <span id="confirmar-direccion"></span><br>
-      <strong>Código postal:</strong> <span id="confirmar-cp"></span>
+      <strong>Código postal:</strong> <span id="confirmar-cp"></span><br>
+      <strong>Teléfono para llamarte:</strong> <span id="confirmar-telefono"></span>
     </p>
     <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
       <button type="button" id="btn-confirmar-si">Sí, todo correcto</button>
@@ -262,6 +282,21 @@ document.getElementById('btn-ubicacion-actual').addEventListener('click', () => 
   });
 });
 
+const bloqueTelefono = document.getElementById('bloque-telefono-llamadas');
+const campoTelefono = document.getElementById('telefono-llamadas');
+document.querySelectorAll('input[name="mismo_telefono"]').forEach((r) => {
+  r.addEventListener('change', () => {
+    const otro = document.querySelector('input[name="mismo_telefono"]:checked').value === 'no';
+    bloqueTelefono.style.display = otro ? 'block' : 'none';
+    campoTelefono.required = otro;
+    if (!otro) campoTelefono.value = '';
+  });
+});
+function telefonoParaLlamadas() {
+  const otro = document.querySelector('input[name="mismo_telefono"]:checked').value === 'no';
+  return otro ? campoTelefono.value.trim() : 'el mismo de tu WhatsApp';
+}
+
 const formAlta = document.querySelector('#btn-terminar-registro').closest('form');
 const bloqueConfirmacion = document.getElementById('confirmacion-datos');
 
@@ -269,6 +304,7 @@ document.getElementById('btn-terminar-registro').addEventListener('click', () =>
   if (!formAlta.reportValidity()) return;
   document.getElementById('confirmar-direccion').textContent = direccionTexto();
   document.getElementById('confirmar-cp').textContent = document.getElementById('paciente-cp').value.trim();
+  document.getElementById('confirmar-telefono').textContent = telefonoParaLlamadas();
   formAlta.style.display = 'none';
   bloqueConfirmacion.style.display = 'block';
   bloqueConfirmacion.scrollIntoView({behavior: 'smooth', block: 'start'});

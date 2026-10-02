@@ -2871,6 +2871,20 @@ def cliente_alta(user):
             flash("Completa todos los campos de la dirección (calle, número, colonia, municipio o alcaldía, código postal y estado).", "error")
             return render_template("cliente_alta.html")
         direccion = f"{calle} {numero}, {colonia}, {municipio}, {estado_direccion}"
+        # Si el WhatsApp no es el teléfono con el que se le puede llamar, el otro número se guarda
+        # en la solicitud (solicitudes.telefono): es el que usa el botón "Llamar" del recolector.
+        mismo_telefono = request.form.get("mismo_telefono", "")
+        telefono_llamadas = None
+        if mismo_telefono not in ("si", "no"):
+            flash("Confirma si tu número de WhatsApp es el mismo teléfono con el que te pueden llamar.", "error")
+            return render_template("cliente_alta.html")
+        if mismo_telefono == "no":
+            telefono_llamadas = telefono_identidad(request.form.get("telefono_llamadas", ""))
+            if telefono_llamadas is None:
+                flash("Escribe un teléfono de 10 dígitos para poder llamarte.", "error")
+                return render_template("cliente_alta.html")
+            if telefono_llamadas == user["telefono"]:
+                telefono_llamadas = None  # es el mismo que su WhatsApp: no hace falta guardarlo aparte
         lat = request.form.get("lat", "").strip()
         lon = request.form.get("lon", "").strip()
         try:
@@ -2901,9 +2915,9 @@ def cliente_alta(user):
         # ruta ya programada que pudiera desarmarse solo por dar cabida a un ingreso nuevo.
         estado_inicial = "lista_espera" if en_espera else "pendiente_entrega"
         cur = db.execute(
-            "INSERT INTO solicitudes (cliente_id, direccion, codigo_postal, material, lat, lon, "
-            "estado, revisado) VALUES (?, ?, ?, 'PVC', ?, ?, ?, 0)",
-            (user["id"], direccion, codigo_postal, lat, lon, estado_inicial),
+            "INSERT INTO solicitudes (cliente_id, direccion, codigo_postal, telefono, material, lat, lon, "
+            "estado, revisado) VALUES (?, ?, ?, ?, 'PVC', ?, ?, ?, 0)",
+            (user["id"], direccion, codigo_postal, telefono_llamadas, lat, lon, estado_inicial),
         )
         db.execute("UPDATE users SET alta_completa = 1, terminos_aceptados = 1 WHERE id = ?", (user["id"],))
         if en_espera:
