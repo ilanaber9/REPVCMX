@@ -1416,23 +1416,6 @@ def ordenar_grupo_por_cercania(grupo, minutos_max=DURACION_MAXIMA_RUTA_MIN):
     return reordenado
 
 
-def zona_mas_cercana(db, lat, lon):
-    """Busca, entre los puntos que ya tienen zona asignada (solicitudes reales de hoy, más los
-    puntos de referencia guardados en zonas_referencia para no depender solo de pacientes activos),
-    cuál está más cerca de (lat, lon) y devuelve (zona, distancia_km), o None si no hay ningún
-    punto con zona y coordenadas."""
-    filas = db.execute(
-        "SELECT zona, lat, lon FROM solicitudes WHERE zona IS NOT NULL AND lat IS NOT NULL AND lon IS NOT NULL "
-        "UNION ALL SELECT zona, lat, lon FROM zonas_referencia"
-    ).fetchall()
-    mejor = None
-    for f in filas:
-        d = haversine_km(lat, lon, f["lat"], f["lon"])
-        if mejor is None or d < mejor[1]:
-            mejor = (f["zona"], d)
-    return mejor
-
-
 LIMITE_MINUTOS_COBERTURA = 20
 
 
@@ -3712,51 +3695,6 @@ def admin_actualizar_modalidad(user, cliente_id):
     db.commit()
     flash(f"'{paciente['name']}' quedó marcado como {'Compra' if modalidad == 'compra' else 'Donación'}.", "success")
     return redirect(url_for("admin_dashboard", tab="pacientes"))
-
-
-@app.route("/admin/solicitudes/<int:solicitud_id>/activar-pendiente-ruta", methods=["POST"])
-@login_required("admin")
-def admin_activar_pendiente_ruta(user, solicitud_id):
-    db = get_db()
-    sol = db.execute(
-        "SELECT * FROM solicitudes WHERE id = ? AND estado = 'lista_espera' AND fuera_cobertura = 1 "
-        "AND revisado = 1",
-        (solicitud_id,),
-    ).fetchone()
-    if sol is None:
-        flash("Esa solicitud ya no está pendiente de ruta.", "error")
-        return redirect(url_for("admin_dashboard", tab="espera"))
-
-    if sol["lat"] is None or sol["lon"] is None or fuera_de_cobertura(db, sol["lat"], sol["lon"]):
-        flash("Todavía no encontramos ninguna zona con ruta cerca de esa dirección.", "error")
-        return redirect(url_for("admin_dashboard", tab="espera"))
-
-    db.execute(
-        "UPDATE solicitudes SET estado = 'pendiente_entrega', fuera_cobertura = 0 WHERE id = ?",
-        (solicitud_id,),
-    )
-    nombre = sol["nombre_contacto"]
-    telefono = None
-    if sol["cliente_id"]:
-        u = db.execute("SELECT name, telefono FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
-        if u:
-            nombre = u["name"]
-            telefono = u["telefono"]
-    db.commit()
-    if telefono:
-        # Solo para el texto del mensaje (no se guarda en la solicitud): un nombre de referencia
-        # amigable de la zona más cercana, aunque ya no se use para decidir en qué ruta va a quedar.
-        cercana = zona_mas_cercana(db, sol["lat"], sol["lon"])
-        zona_referencia = cercana[0] if cercana else "tu domicilio"
-        enviar_whatsapp_primer_contacto(
-            telefono_whatsapp_e164(telefono),
-            "TWILIO_TEMPLATE_ACTIVAR_RUTA_SID",
-            {"1": nombre, "2": zona_referencia},  # la plantilla ya pone los paréntesis: "tu zona ({{2}})"
-            f"Hola {nombre},\n\n¡Buenas noticias! Ya tenemos ruta cerca de tu domicilio ({zona_referencia}) y quedaste integrado.\n"
-            "Te avisaremos con la fecha y el horario aproximado en cuanto tu recolección quede programada.",
-        )
-    flash(f"'{nombre}' se activó — pendiente de programarse.", "success")
-    return redirect(url_for("admin_dashboard", tab="espera"))
 
 
 @app.route("/admin/solicitudes/<int:solicitud_id>/regresar-bote", methods=["POST"])
