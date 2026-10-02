@@ -605,7 +605,7 @@
     </p>
     {% if pacientes %}
     <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap;">
-      <input type="text" id="buscar-pacientes" placeholder="Buscar por nombre, teléfono o ruta..." autocomplete="off" style="flex:1; min-width:220px; max-width:340px;">
+      <input type="text" id="buscar-pacientes" placeholder="Buscar por nombre o teléfono..." autocomplete="off" style="flex:1; min-width:220px; max-width:340px;">
       <div class="solo-escritorio" style="display:flex; gap:6px;">
         <button type="button" class="small secondary" id="btn-pacientes-izq">&larr;</button>
         <button type="button" class="small secondary" id="btn-pacientes-der">&rarr;</button>
@@ -614,9 +614,9 @@
     <p id="pacientes-sin-resultados" class="empty" style="display:none;">Ningún paciente coincide con la búsqueda.</p>
     <div id="tabla-pacientes" class="table-scroll">
     <table>
-      <tr><th>Nombre</th><th>WhatsApp (cuenta)</th><th>Teléfono (entrega)</th><th>Edad</th><th>Tipo</th><th>Marca</th><th>Frecuencia/semana</th><th>Causa</th><th>Dirección</th><th>Ruta</th><th>Modalidad</th><th>Última visita</th><th>Material recolectado</th><th>Estado</th><th>Bote</th><th></th></tr>
+      <tr><th>Nombre</th><th>WhatsApp (cuenta)</th><th>Teléfono (entrega)</th><th>Edad</th><th>Tipo</th><th>Marca</th><th>Frecuencia/semana</th><th>Causa</th><th>Dirección</th><th>Modalidad</th><th>Última visita</th><th>Material recolectado</th><th>Estado</th><th>Bote</th><th></th></tr>
       {% for p in pacientes %}
-      <tr data-buscar="{{ (p['name'] ~ ' ' ~ (p['telefono'] or '') ~ ' ' ~ (p['telefono_actual'] or '') ~ ' ' ~ (p['ruta_actual'] or '')) | lower }}">
+      <tr data-buscar="{{ (p['name'] ~ ' ' ~ (p['telefono'] or '') ~ ' ' ~ (p['telefono_actual'] or '')) | lower }}">
         <td>{{ p['name'] }}{% if p['modalidad_actual'] == 'compra' %} 💲{% endif %}</td>
         <td>{{ ('+52 ' + p['telefono']) if p['telefono'] else '—' }}</td>
         <td>{{ p['telefono_actual'] or '—' }}</td>
@@ -636,7 +636,6 @@
         <td colspan="5" style="color:var(--muted);">Aún no completa su perfil</td>
         {% endif %}
         <td>{{ p['direccion_actual'] or '—' }}</td>
-        <td>{{ p['ruta_actual'] or 'Sin ruta asignada' }}</td>
         <td>
           {% if p['alta_completa'] %}
           <form method="post" action="{{ url_for('admin_actualizar_modalidad', cliente_id=p['id']) }}">

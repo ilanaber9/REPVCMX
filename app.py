@@ -3124,7 +3124,6 @@ def admin_dashboard(user):
             "ORDER BY (r.nombre IS NULL), (s.zona IS NULL), s.created_at DESC, pa.id DESC LIMIT 1",
             (p["id"],),
         ).fetchone()
-        paciente["ruta_actual"] = (ruta_sol["ruta_nombre"] or ruta_sol["zona"]) if ruta_sol else None
         paciente["direccion_actual"] = ruta_sol["direccion"] if ruta_sol else None
         paciente["telefono_actual"] = (ruta_sol["telefono"] if ruta_sol else None) or paciente["telefono"]
         paciente["modalidad_actual"] = ruta_sol["modalidad"] if ruta_sol else None
