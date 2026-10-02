@@ -1359,15 +1359,38 @@ def geocodificar_codigo_postal(codigo_postal, limite=5):
         return []
 
 
+def campos_direccion_desde_nominatim(address):
+    """Convierte el desglose de una dirección de Nominatim (el dict 'address') en los campos del
+    formulario de dirección: calle, numero, colonia, municipio, codigo_postal, estado. Lo que
+    Nominatim no trae queda vacío, para que el paciente lo complete (los 6 son obligatorios).
+    En la CDMX la alcaldía viene como 'borough'; en el Edomex el municipio suele venir como
+    'city', 'town' o 'municipality'."""
+    def primero(*claves):
+        for c in claves:
+            if address.get(c):
+                return address[c]
+        return ""
+    return {
+        "calle": primero("road", "pedestrian", "footway", "residential"),
+        "numero": primero("house_number"),
+        "colonia": primero("neighbourhood", "suburb", "quarter", "city_district"),
+        "municipio": primero("borough", "municipality", "city", "town", "village", "county"),
+        "codigo_postal": primero("postcode"),
+        "estado": primero("state"),
+    }
+
+
 def geocodificar_inverso(lat, lon):
-    """Convierte coordenadas GPS a una dirección legible con Nominatim (geocodificación
-    inversa). Devuelve el texto de la dirección o None si falla."""
-    query = urlencode({"lat": lat, "lon": lon, "format": "json"})
+    """Convierte coordenadas GPS en los campos de dirección (ver campos_direccion_desde_nominatim)
+    con Nominatim (geocodificación inversa). Devuelve el dict o None si falla."""
+    query = urlencode({"lat": lat, "lon": lon, "format": "json", "addressdetails": 1, "zoom": 18})
     url = f"https://nominatim.openstreetmap.org/reverse?{query}"
     try:
         body = _http_get(url, headers={"User-Agent": "rutas-recoleccion-app/1.0"}, timeout=8)
         data = json.loads(body)
-        return data.get("display_name")
+        if not data.get("address"):
+            return None
+        return campos_direccion_desde_nominatim(data["address"])
     except Exception:
         return None
 
@@ -3584,8 +3607,7 @@ def cliente_geocodificar_inverso(user):
         lon = float(request.args.get("lon", ""))
     except ValueError:
         return jsonify({"error": "Coordenadas inválidas."}), 400
-    direccion = geocodificar_inverso(lat, lon)
-    return jsonify({"direccion": direccion})
+    return jsonify({"campos": geocodificar_inverso(lat, lon)})
 
 
 @app.route("/admin/mapa")

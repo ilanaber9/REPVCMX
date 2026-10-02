@@ -181,6 +181,32 @@ function buscarDireccionAutomatico() {
   document.getElementById(id).addEventListener('input', buscarDireccionAutomatico);
 });
 
+const CAMPOS_ALTA = {
+  calle: 'paciente-calle', numero: 'paciente-numero', colonia: 'paciente-colonia',
+  municipio: 'paciente-municipio', codigo_postal: 'paciente-cp', estado: 'paciente-estado',
+};
+
+// Con "usar mi ubicación actual" la dirección escrita ya no vale: se reemplaza por la del pin, para
+// que lo que se guarda como texto sea el mismo lugar que marca el mapa.
+async function llenarCamposDesdeUbicacion(lat, lon) {
+  let campos = null;
+  try {
+    const resp = await fetch(`/cliente/geocodificar-inverso?lat=${lat}&lon=${lon}`);
+    campos = (await resp.json()).campos;
+  } catch (e) {}
+  Object.entries(CAMPOS_ALTA).forEach(([clave, id]) => {
+    document.getElementById(id).value = campos ? (campos[clave] || '') : '';
+  });
+  if (!campos) {
+    estado.textContent = 'Ubicación encontrada, pero no pudimos obtener tu dirección. Escríbela en los campos y revisa el pin.';
+    return;
+  }
+  const faltan = Object.entries(CAMPOS_ALTA).filter(([clave]) => !campos[clave]).length;
+  estado.textContent = faltan
+    ? 'Ubicación encontrada y campos llenados. Completa los que quedaron vacíos y revisa que el pin esté en el lugar correcto.'
+    : 'Ubicación encontrada y campos llenados. Revisa que todo esté correcto y que el pin esté en el lugar correcto.';
+}
+
 document.getElementById('btn-ubicacion-actual').addEventListener('click', () => {
   if (!navigator.geolocation) {
     estado.textContent = 'Tu navegador no permite compartir tu ubicación. Búscala o márcala en el mapa.';
@@ -193,7 +219,8 @@ document.getElementById('btn-ubicacion-actual').addEventListener('click', () => 
       const lat = posicion.coords.latitude;
       const lon = posicion.coords.longitude;
       ubicar(lat, lon);
-      estado.textContent = 'Ubicación encontrada. Completa los campos de tu dirección y revisa que el pin esté en el lugar correcto.';
+      estado.textContent = 'Ubicación encontrada. Buscando tu dirección…';
+      await llenarCamposDesdeUbicacion(lat, lon);
     },
     () => {
       estado.textContent = 'No pudimos obtener tu ubicación — revisa los permisos de ubicación del navegador, o búscala/márcala en el mapa.';
