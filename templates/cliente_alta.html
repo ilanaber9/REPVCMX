@@ -33,6 +33,10 @@
         <input type="text" id="paciente-estado" name="estado" required>
       </div>
     </div>
+    <label>Referencias de tu domicilio</label>
+    <textarea name="referencias" id="paciente-referencias" rows="2" maxlength="300" required
+              placeholder="Ej.: casa de fachada azul con portón negro, frente a la tienda de abarrotes “Lupita”"></textarea>
+    <p style="color:var(--muted); font-size:0.8rem; margin:2px 0 0;">Color de la fachada, frente a qué local está, entre qué calles… lo que ayude al recolector a encontrarte rápido.</p>
     <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
       <button type="button" class="small secondary" id="btn-buscar-direccion">Buscar en el mapa</button>
       <button type="button" class="small secondary" id="btn-ubicacion-actual">📍 Usar mi ubicación actual</button>
@@ -86,7 +90,8 @@
     <p style="line-height:1.8;">
       <strong>Dirección:</strong> <span id="confirmar-direccion"></span><br>
       <strong>Código postal:</strong> <span id="confirmar-cp"></span><br>
-      <strong>Teléfono para llamarte:</strong> <span id="confirmar-telefono"></span>
+      <strong>Teléfono para llamarte:</strong> <span id="confirmar-telefono"></span><br>
+      <strong>Referencias:</strong> <span id="confirmar-referencias"></span>
     </p>
     <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
       <button type="button" id="btn-confirmar-si">Sí, todo correcto</button>
@@ -305,6 +310,7 @@ document.getElementById('btn-terminar-registro').addEventListener('click', () =>
   document.getElementById('confirmar-direccion').textContent = direccionTexto();
   document.getElementById('confirmar-cp').textContent = document.getElementById('paciente-cp').value.trim();
   document.getElementById('confirmar-telefono').textContent = telefonoParaLlamadas();
+  document.getElementById('confirmar-referencias').textContent = document.getElementById('paciente-referencias').value.trim();
   formAlta.style.display = 'none';
   bloqueConfirmacion.style.display = 'block';
   bloqueConfirmacion.scrollIntoView({behavior: 'smooth', block: 'start'});

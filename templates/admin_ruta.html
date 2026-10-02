@@ -102,6 +102,7 @@
       Cliente: {{ p['cliente_nombre'] }}{% if p['modalidad'] == 'compra' %} 💲{% endif %}
       {% if p['material'] != 'PVC' %} · Material: {{ p['material'] }}{% endif %}
       {% if p['modalidad'] %} · {{ 'Compra' if p['modalidad'] == 'compra' else 'Donación' }}{% endif %}
+      {% if p['referencias'] %}<br>📍 Referencias: {{ p['referencias'] }}{% endif %}
       {% if p['notas_solicitud'] %}<br>Notas del cliente: {{ p['notas_solicitud'] }}{% endif %}
       {% if p['notas'] %}<br>Notas del recolector: {{ p['notas'] }}{% endif %}
 

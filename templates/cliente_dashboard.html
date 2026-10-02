@@ -155,6 +155,10 @@
           <input type="text" id="dir-estado-campo" name="estado" required>
         </div>
       </div>
+      <label>Referencias de tu domicilio</label>
+      <textarea name="referencias" id="dir-referencias" rows="2" maxlength="300" required
+                placeholder="Ej.: casa de fachada azul con portón negro, frente a la tienda de abarrotes “Lupita”">{{ solicitud_principal['referencias'] or '' }}</textarea>
+      <p style="color:var(--muted); font-size:0.8rem; margin:2px 0 0;">Color de la fachada, frente a qué local está, entre qué calles… lo que ayude al recolector a encontrarte rápido.</p>
       <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
         <button type="button" class="small secondary" id="dir-btn-buscar">Buscar en el mapa</button>
         <button type="button" class="small secondary" id="dir-btn-ubicacion">📍 Usar mi ubicación actual</button>

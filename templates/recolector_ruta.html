@@ -101,6 +101,7 @@
       · Material: {{ p['material_extra'] }}
       {% endif %}
       {% if p['modalidad'] %} · {{ 'Compra' if p['modalidad'] == 'compra' else 'Donación' }}{% endif %}
+      {% if p['referencias'] %}<br>📍 Referencias: {{ p['referencias'] }}{% endif %}
       {% if p['notas_solicitud'] %}<br>Notas del cliente: {{ p['notas_solicitud'] }}{% endif %}
 
       <div class="estado-form" style="margin-top:8px;">
@@ -125,13 +126,11 @@
       <form class="estado-form" method="post" action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
         <input type="hidden" name="parte" value="principal">
         <input type="text" name="notas" placeholder="Notas (opcional)" value="{{ p['notas'] or '' }}" style="flex:1; min-width:160px;">
-        {% if p['tipo_redistribucion'] is none %}
         <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
-          Kg recolectados
+          {% if p['tipo_redistribucion'] is none %}Kg recolectados{% else %}Kg de material recolectado (si te dieron){% endif %}
           <input type="number" name="kg" step="0.1" min="0" placeholder="0"
-                 value="{{ p['kg_recolectados'] or '' }}" style="width:120px;">
+                 value="{{ p['kg_recolectados'] or '' }}" style="width:{{ '120px' if p['tipo_redistribucion'] is none else '200px' }};">
         </label>
-        {% endif %}
         {% if p['cantidad_cajas'] is not none %}
         <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
           {{ 'Cajas entregadas' if p['tipo'] == 'entrega' else 'Cajas recibidas' }} (solicitó {{ p['cantidad_cajas'] }})
@@ -165,6 +164,14 @@
         {% if p['estado_extra'] == 'pendiente' %}
         <form class="estado-form" method="post" action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
           <input type="hidden" name="parte" value="extra">
+          {% if p['estado'] != 'pendiente' %}
+          {# el kg de la visita se captura una sola vez: aquí solo si la primera parte ya se cerró #}
+          <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
+            Kg de material recolectado (si te dieron)
+            <input type="number" name="kg" step="0.1" min="0" placeholder="0"
+                   value="{{ p['kg_recolectados'] or '' }}" style="width:200px;">
+          </label>
+          {% endif %}
           {% if p['cantidad_cajas_extra'] is not none %}
           <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
             {{ 'Cajas entregadas' if p['tipo_extra'] == 'entrega' else 'Cajas recibidas' }} (solicitó {{ p['cantidad_cajas_extra'] }})

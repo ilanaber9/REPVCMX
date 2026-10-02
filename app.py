@@ -2191,6 +2191,9 @@ def aplicar_migraciones_pendientes():
     db.execute("UPDATE rutas SET estado = 'completada' WHERE hora_fin_real IS NOT NULL AND estado = 'en_curso'")
 
     columnas_solicitudes = {r["name"] for r in db.execute("PRAGMA table_info(solicitudes)")}
+    if "referencias" not in columnas_solicitudes:
+        # Cómo reconocer el domicilio (color de fachada, frente a qué local...) para el recolector.
+        db.execute("ALTER TABLE solicitudes ADD COLUMN referencias TEXT")
     if "revisado" not in columnas_solicitudes:
         # DEFAULT 1 para que todo lo que ya existía en producción (antes de este cambio) no se
         # quede escondido de golpe: solo las altas NUEVAS (cliente_alta) se crean con 0, para que
@@ -2944,6 +2947,10 @@ def cliente_alta(user):
             flash("Completa todos los campos de la dirección (calle, número, colonia, municipio o alcaldía, código postal y estado).", "error")
             return render_template("cliente_alta.html")
         direccion = f"{calle} {numero}, {colonia}, {municipio}, {estado_direccion}"
+        referencias = request.form.get("referencias", "").strip()
+        if not referencias:
+            flash("Escribe una referencia de tu domicilio (color de la fachada, frente a qué local está...) para que el recolector lo encuentre fácil.", "error")
+            return render_template("cliente_alta.html")
         # Si el WhatsApp no es el teléfono con el que se le puede llamar, el otro número se guarda
         # en la solicitud (solicitudes.telefono): es el que usa el botón "Llamar" del recolector.
         mismo_telefono = request.form.get("mismo_telefono", "")
@@ -2988,9 +2995,9 @@ def cliente_alta(user):
         # ruta ya programada que pudiera desarmarse solo por dar cabida a un ingreso nuevo.
         estado_inicial = "lista_espera" if en_espera else "pendiente_entrega"
         cur = db.execute(
-            "INSERT INTO solicitudes (cliente_id, direccion, codigo_postal, telefono, material, lat, lon, "
-            "estado, revisado) VALUES (?, ?, ?, ?, 'PVC', ?, ?, ?, 0)",
-            (user["id"], direccion, codigo_postal, telefono_llamadas, lat, lon, estado_inicial),
+            "INSERT INTO solicitudes (cliente_id, direccion, codigo_postal, referencias, telefono, material, lat, lon, "
+            "estado, revisado) VALUES (?, ?, ?, ?, ?, 'PVC', ?, ?, ?, 0)",
+            (user["id"], direccion, codigo_postal, referencias[:300], telefono_llamadas, lat, lon, estado_inicial),
         )
         db.execute("UPDATE users SET alta_completa = 1, terminos_aceptados = 1 WHERE id = ?", (user["id"],))
         if en_espera:
@@ -3152,13 +3159,13 @@ def cliente_nueva_solicitud(user):
     estado_inicial = "pendiente_entrega" if tipo == "material" else "pendiente"
     db = get_db()
     alta = db.execute(
-        "SELECT direccion, lat, lon FROM solicitudes WHERE cliente_id = ? AND lat IS NOT NULL "
+        "SELECT direccion, lat, lon, referencias FROM solicitudes WHERE cliente_id = ? AND lat IS NOT NULL "
         "ORDER BY created_at DESC LIMIT 1",
         (user["id"],),
     ).fetchone()
     if alta is None:
         alta = db.execute(
-            "SELECT direccion, lat, lon FROM solicitudes WHERE cliente_id = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT direccion, lat, lon, referencias FROM solicitudes WHERE cliente_id = ? ORDER BY created_at DESC LIMIT 1",
             (user["id"],),
         ).fetchone()
     direccion = alta["direccion"] if alta else ""
@@ -3173,10 +3180,10 @@ def cliente_nueva_solicitud(user):
 
     cur = db.execute(
         "INSERT INTO solicitudes (cliente_id, direccion, material, notas, cantidad_cajas, "
-        "tipo_redistribucion, lat, lon, estado, recoger_en_sitio, confirmado_existencia) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "tipo_redistribucion, lat, lon, estado, recoger_en_sitio, confirmado_existencia, referencias) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (user["id"], direccion, material, notas, cantidad_cajas, tipo, lat, lon, estado_inicial,
-         1 if recoger_en_sitio else 0, 1 if hay_existencia else 0),
+         1 if recoger_en_sitio else 0, 1 if hay_existencia else 0, alta["referencias"] if alta else None),
     )
     nueva_solicitud_id = cur.lastrowid
     cajas_texto = f"{cantidad_cajas} caja(s)" if cantidad_cajas else "cajas"
@@ -3396,6 +3403,10 @@ def cliente_actualizar_direccion(user):
         flash("Completa todos los campos de la dirección (calle, número, colonia, municipio o alcaldía, código postal y estado).", "error")
         return redirect(url_for("cliente_dashboard", tab="direccion"))
     direccion = f"{calle} {numero}, {colonia}, {municipio}, {estado_direccion}"
+    referencias = request.form.get("referencias", "").strip()
+    if not referencias:
+        flash("Escribe una referencia de tu domicilio (color de la fachada, frente a qué local está...).", "error")
+        return redirect(url_for("cliente_dashboard", tab="direccion"))
     lat = request.form.get("lat", "").strip()
     lon = request.form.get("lon", "").strip()
     try:
@@ -3419,8 +3430,8 @@ def cliente_actualizar_direccion(user):
             return redirect(url_for("cliente_dashboard", tab="direccion"))
 
     db.execute(
-        "UPDATE solicitudes SET direccion = ?, codigo_postal = ?, lat = ?, lon = ? WHERE id = ?",
-        (direccion, codigo_postal, lat, lon, sol["id"]),
+        "UPDATE solicitudes SET direccion = ?, codigo_postal = ?, referencias = ?, lat = ?, lon = ? WHERE id = ?",
+        (direccion, codigo_postal, referencias[:300], lat, lon, sol["id"]),
     )
     crear_notificacion_admin(db, user["id"], f"'{user['name']}' actualizó su dirección — {direccion}.")
     db.commit()
@@ -5039,7 +5050,7 @@ def admin_ver_ruta(user, ruta_id):
         (ruta_id,),
     ).fetchone()
     paradas = db.execute(
-        "SELECT p.*, s.direccion, s.material, s.modalidad, s.notas AS notas_solicitud, "
+        "SELECT p.*, s.direccion, s.referencias, s.material, s.modalidad, s.notas AS notas_solicitud, "
         "s.cantidad_cajas, s.lat, s.lon, s.bote_a_devolver, "
         "COALESCE(u.name, s.nombre_contacto) AS cliente_nombre, "
         "s2.material AS material_extra, s2.cantidad_cajas AS cantidad_cajas_extra "
@@ -5905,7 +5916,7 @@ def recolector_ver_ruta(user, ruta_id):
         flash("Esa ruta no está asignada a tu cuenta.", "error")
         return redirect(url_for("recolector_dashboard"))
     paradas = db.execute(
-        "SELECT p.*, s.direccion, s.material, s.modalidad, s.notas AS notas_solicitud, "
+        "SELECT p.*, s.direccion, s.referencias, s.material, s.modalidad, s.notas AS notas_solicitud, "
         "s.cantidad_cajas, s.lat, s.lon, COALESCE(s.telefono, u.telefono) AS telefono, "
         "s.tipo_redistribucion, s.bote_a_devolver, "
         "COALESCE(u.name, s.nombre_contacto) AS cliente_nombre, "
@@ -6336,6 +6347,17 @@ def recolector_actualizar_parada(user, parada_id):
             db.execute(
                 "UPDATE users SET material_recolectado_kg = material_recolectado_kg + ? WHERE id = ?",
                 (delta_kg, parada["cliente_id"]),
+            )
+        # Material recolectado en una visita de cajas: el paciente acaba de entregar material, así que
+        # su espera de 30/60 días para la siguiente recolección de PVC arranca ahora (si no, volvería a
+        # salir listo para otra ruta de inmediato). Si su solicitud de PVC va en esta misma visita, esa
+        # parte ya reinicia la espera al cerrarse.
+        tipo_parte = parada["tipo_redistribucion_extra"] if resolviendo_extra else parada["tipo_redistribucion"]
+        if kg_final > 0 and tipo_parte is not None and parada["cliente_id"]:
+            db.execute(
+                "UPDATE solicitudes SET fecha_reinicio_espera = ? WHERE cliente_id = ? "
+                "AND tipo_redistribucion IS NULL AND estado = 'pendiente'",
+                (ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S"), parada["cliente_id"]),
             )
 
     if "cajas" in request.form:

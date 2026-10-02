@@ -239,6 +239,7 @@ CREATE TABLE solicitudes (
   nombre_contacto TEXT,
   direccion TEXT NOT NULL,
   codigo_postal TEXT,
+  referencias TEXT,
   telefono TEXT,
   edad INTEGER,
   tipo_maquina TEXT CHECK(tipo_maquina IN ('maquina','manual')),
