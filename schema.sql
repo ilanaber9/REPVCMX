@@ -275,6 +275,7 @@ CREATE TABLE rutas (
   recolector_id INTEGER REFERENCES users(id),
   estado TEXT NOT NULL DEFAULT 'planificada' CHECK(estado IN ('planificada','en_curso','completada')),
   suspendida INTEGER NOT NULL DEFAULT 0,
+  factor_trafico_real REAL,
   created_at TEXT DEFAULT (datetime('now','localtime'))
 );
 

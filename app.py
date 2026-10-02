@@ -11,6 +11,7 @@ import re
 import secrets
 import smtplib
 import socket
+import statistics
 import sqlite3
 import subprocess
 import tempfile
@@ -542,6 +543,73 @@ def _google_tramos(secuencia, salida):
     return tramos
 
 
+_factor_aprendido_cache = [0.0, None]
+RUTAS_PARA_APRENDER = 12  # cuántas rutas recientes se toman en cuenta
+FACTOR_TRAFICO_MIN, FACTOR_TRAFICO_MAX = 1.0, 4.0
+
+
+def factor_trafico():
+    """Cuántas veces más tarda manejar de lo que dice OSRM (que no sabe de tráfico). Se aprende de lo
+    que de verdad pasó: la mediana de las últimas rutas ya terminadas (ver registrar_factor_trafico_real),
+    que no se deja llevar por una sola ruta rara. Mientras no haya ninguna, FACTOR_TRAFICO."""
+    ahora = time_module.time()
+    if ahora < _factor_aprendido_cache[0] and _factor_aprendido_cache[1] is not None:
+        return _factor_aprendido_cache[1]
+    valor = FACTOR_TRAFICO
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=0.5)
+        try:
+            filas = conn.execute(
+                "SELECT factor_trafico_real FROM rutas WHERE factor_trafico_real IS NOT NULL "
+                "ORDER BY fecha DESC, id DESC LIMIT ?", (RUTAS_PARA_APRENDER,)
+            ).fetchall()
+        finally:
+            conn.close()
+        if filas:
+            valor = statistics.median(f[0] for f in filas)
+    except Exception:
+        pass
+    _factor_aprendido_cache[0] = ahora + 300
+    _factor_aprendido_cache[1] = valor
+    return valor
+
+
+def registrar_factor_trafico_real(db, ruta_id):
+    """Al terminar una ruta, compara lo que de verdad tardó con lo que OSRM estimaba SIN tráfico y
+    guarda esa proporción en la ruta, para que las siguientes estimaciones (y los horarios que se le
+    avisan al paciente) salgan más cerca de la realidad (ver factor_trafico). Al tiempo real se le
+    restan MINUTOS_POR_PARADA por cada parada visitada. No cuenta rutas suspendidas ni con menos de
+    3 paradas visitadas (muy poca información), y la proporción se limita a un rango razonable
+    porque una comida o un retraso largo también alargan el tiempo."""
+    ruta = db.execute(
+        "SELECT hora_inicio_real, hora_fin_real, suspendida FROM rutas WHERE id = ?", (ruta_id,)
+    ).fetchone()
+    if not ruta or ruta["suspendida"] or not ruta["hora_inicio_real"] or not ruta["hora_fin_real"]:
+        return None
+    visitadas = db.execute(
+        "SELECT s.lat, s.lon FROM paradas p JOIN solicitudes s ON s.id = p.solicitud_id "
+        "WHERE p.ruta_id = ? AND p.estado IN ('completada', 'ausente') AND s.lat IS NOT NULL "
+        "AND s.lon IS NOT NULL ORDER BY p.orden",
+        (ruta_id,),
+    ).fetchall()
+    if len(visitadas) < 3:
+        return None
+    try:
+        inicio = datetime.strptime(ruta["hora_inicio_real"], "%Y-%m-%d %H:%M:%S")
+        fin = datetime.strptime(ruta["hora_fin_real"], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    manejo_real = (fin - inicio).total_seconds() / 60 - len(visitadas) * MINUTOS_POR_PARADA
+    secuencia = [(DEPOT_LAT, DEPOT_LON)] + [(v["lat"], v["lon"]) for v in visitadas] + [(DEPOT_LAT, DEPOT_LON)]
+    osrm = osrm_distancia_duracion(secuencia)
+    if manejo_real <= 0 or not osrm or osrm[1] <= 0:
+        return None
+    factor = min(FACTOR_TRAFICO_MAX, max(FACTOR_TRAFICO_MIN, manejo_real / osrm[1]))
+    db.execute("UPDATE rutas SET factor_trafico_real = ? WHERE id = ?", (round(factor, 3), ruta_id))
+    _factor_aprendido_cache[0] = 0.0  # que la siguiente estimación ya use este dato
+    return factor
+
+
 def osrm_distancia_duracion(secuencia):
     """secuencia: lista de (lat, lon) en orden de visita. Devuelve (km, minutos_manejo, geometria, tramos_min)
     usando calles reales (OSRM público, sin API key) o None si falla/no hay internet.
@@ -593,7 +661,7 @@ def estimar_ruta(puntos, salida=None, usar_trafico=True):
     trafico = _google_tramos(secuencia, salida) if usar_trafico else None
     if osrm:
         distancia_km, minutos_manejo, geometria, _tramos_min = osrm
-        minutos_manejo *= FACTOR_TRAFICO
+        minutos_manejo *= factor_trafico()
         fuente = "calles"
     else:
         distancia_km = sum(
@@ -616,6 +684,7 @@ def estimar_ruta(puntos, salida=None, usar_trafico=True):
         "geometria": geometria,
         "salida_texto": salida.strftime("%d/%m %H:%M") if fuente == "trafico" else None,
         "trafico_no_disponible": google_maps_configurado() and usar_trafico and fuente != "trafico",
+        "ajustado_con_rutas": fuente == "calles" and factor_trafico() != FACTOR_TRAFICO,
     }
 
 
@@ -903,7 +972,7 @@ def horario_estimado_siguiente(db, parada_id):
     if trafico is not None:
         minutos = trafico[0]
     elif osrm:
-        minutos = osrm[1] * FACTOR_TRAFICO
+        minutos = osrm[1] * factor_trafico()
     else:
         minutos = haversine_km(origen_lat, origen_lon, parada["lat"], parada["lon"]) / VELOCIDAD_PROMEDIO_KMH * 60
 
@@ -954,7 +1023,7 @@ def horario_estimado_parada(db, parada_id):
         if not osrm:
             return None
         tramos_min = osrm[3]
-        factor = FACTOR_TRAFICO
+        factor = factor_trafico()
 
     indice = [p["id"] for p in con_coords].index(parada["id"])
     minutos_acumulados = sum(t * factor for t in tramos_min[: indice + 1]) + indice * MINUTOS_POR_PARADA
@@ -1927,6 +1996,10 @@ def aplicar_migraciones_pendientes():
             db.execute(f"ALTER TABLE users ADD COLUMN {columna} {definicion}")
 
     columnas_rutas = {r["name"] for r in db.execute("PRAGMA table_info(rutas)")}
+    if "factor_trafico_real" not in columnas_rutas:
+        # Cuántas veces más tardó de verdad el manejo de esa ruta que lo que dice OSRM sin tráfico
+        # (ver registrar_factor_trafico_real); NULL en las rutas viejas o que no sirven para aprender.
+        db.execute("ALTER TABLE rutas ADD COLUMN factor_trafico_real REAL")
     if "suspendida" not in columnas_rutas:
         db.execute("ALTER TABLE rutas ADD COLUMN suspendida INTEGER NOT NULL DEFAULT 0")
         # Las rutas suspendidas antes de existir esta columna se reconocen por la nota que
@@ -5924,6 +5997,7 @@ def recolector_finalizar_ruta(user, ruta_id):
 
     ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
     db.execute("UPDATE rutas SET hora_fin_real = ?, estado = 'completada' WHERE id = ?", (ahora, ruta_id))
+    registrar_factor_trafico_real(db, ruta_id)
     sin_atender = _liberar_paradas_sin_atender(db, ruta_id)
     db.execute(
         "UPDATE solicitudes SET estado = 'pendiente' WHERE estado IN ('recolectada', 'incidencia') "
