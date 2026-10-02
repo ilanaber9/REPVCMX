@@ -451,59 +451,82 @@ const dirResultadosDiv = document.getElementById('dir-resultados');
 
 function dirMostrarResultados(resultados) {
   dirResultadosDiv.innerHTML = '';
-  if (resultados.length === 1) {
-    dirUbicar(resultados[0].lat, resultados[0].lon);
-    dirEstado.textContent = 'Ubicación encontrada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
+  const mejor = resultados[0];
+  dirUbicar(mejor.lat, mejor.lon);
+  if (mejor.precision === 'cp') {
+    mapaDireccion.setView([mejor.lat, mejor.lon], 14);
+    dirEstado.textContent = 'No encontramos esa calle en el mapa: pusimos el pin en el centro de tu código postal. Arrastra el pin o toca el mapa en el lugar exacto de tu casa.';
     return;
   }
-  dirEstado.textContent = 'Encontramos varios lugares que podrían coincidir — elige el correcto:';
-  resultados.forEach((r) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'small secondary';
-    btn.style.display = 'block';
-    btn.style.width = '100%';
-    btn.style.textAlign = 'left';
-    btn.style.marginTop = '6px';
-    btn.textContent = r.etiqueta;
-    btn.addEventListener('click', () => {
-      dirUbicar(r.lat, r.lon);
-      dirResultadosDiv.innerHTML = '';
-      dirEstado.textContent = 'Ubicación seleccionada. Si no cae en el lugar correcto, arrastra el pin o haz clic en el mapa.';
+  if (mejor.precision === 'municipio') {
+    mapaDireccion.setView([mejor.lat, mejor.lon], 12);
+    dirEstado.textContent = 'No encontramos esa calle ni tu código postal en el mapa: pusimos el pin en tu municipio. Toca el mapa en el lugar exacto de tu casa.';
+    return;
+  }
+  dirEstado.textContent = 'Ubicamos tu dirección. Revisa que el pin esté en tu casa; si no, arrástralo o toca el mapa.';
+  if (resultados.length > 1) {
+    const aviso = document.createElement('p');
+    aviso.style.cssText = 'font-size:0.8rem; color:var(--muted); margin:8px 0 0;';
+    aviso.textContent = '¿No es esta? Elige otra:';
+    dirResultadosDiv.appendChild(aviso);
+    resultados.slice(1).forEach((r) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'small secondary';
+      btn.style.display = 'block';
+      btn.style.width = '100%';
+      btn.style.textAlign = 'left';
+      btn.style.marginTop = '6px';
+      btn.textContent = r.etiqueta;
+      btn.addEventListener('click', () => {
+        dirUbicar(r.lat, r.lon);
+        dirResultadosDiv.innerHTML = '';
+        dirEstado.textContent = 'Ubicación seleccionada. Si no cae en tu casa, arrastra el pin o toca el mapa.';
+      });
+      dirResultadosDiv.appendChild(btn);
     });
-    dirResultadosDiv.appendChild(btn);
-  });
+  }
 }
 
+let dirBusquedaId = 0;
 async function dirBuscarDireccion() {
-  const direccion = dirDireccionTexto();
-  if (!direccion) {
+  const id = ++dirBusquedaId;
+  const valor = (campo) => document.getElementById(campo).value.trim();
+  const calle = valor('dir-calle');
+  if (!calle) {
     dirEstado.textContent = 'Escribe al menos la calle primero.';
     return;
   }
-  const cp = document.getElementById('dir-cp').value.trim();
-  dirLinkGoogle.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(direccion);
+  dirLinkGoogle.href = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(dirDireccionTexto());
   dirEstado.textContent = 'Buscando…';
   dirResultadosDiv.innerHTML = '';
   try {
-    let url = '/cliente/geocodificar?direccion=' + encodeURIComponent(direccion);
-    if (cp) url += '&cp=' + encodeURIComponent(cp);
-    const resp = await fetch(url);
+    const consulta = new URLSearchParams({
+      calle, numero: valor('dir-numero'), municipio: valor('dir-municipio'),
+      estado: valor('dir-estado-campo'), cp: valor('dir-cp'),
+    });
+    const resp = await fetch('/cliente/geocodificar?' + consulta.toString());
     const data = await resp.json();
+    if (id !== dirBusquedaId) return;
     if (!resp.ok) throw new Error(data.error || 'No encontrado');
     dirMostrarResultados(data.resultados);
   } catch (e) {
-    dirEstado.textContent = e.message + ' Haz clic en el mapa para marcar la ubicación exacta, o revisa en Google Maps.';
+    if (id !== dirBusquedaId) return;
+    dirEstado.textContent = e.message + ' Toca el mapa para marcar el lugar exacto de tu casa, o revisa en Google Maps.';
   }
 }
 
 document.getElementById('dir-btn-buscar').addEventListener('click', dirBuscarDireccion);
 
+// Se busca sola al escribir, pero solo cuando ya hay calle y (CP o municipio): con menos datos el
+// mapa adivinaría cualquier lugar y el pin saltaría mientras se teclea.
 let dirTemporizadorDireccion = null;
 function dirBuscarDireccionAutomatico() {
   clearTimeout(dirTemporizadorDireccion);
-  if (document.getElementById('dir-calle').value.trim().length < 3) return;
-  dirTemporizadorDireccion = setTimeout(dirBuscarDireccion, 700);
+  const valor = (campo) => document.getElementById(campo).value.trim();
+  if (valor('dir-calle').length < 3) return;
+  if (valor('dir-cp').length < 5 && valor('dir-municipio').length < 3) return;
+  dirTemporizadorDireccion = setTimeout(dirBuscarDireccion, 1200);
 }
 ['dir-calle', 'dir-numero', 'dir-colonia', 'dir-municipio', 'dir-cp', 'dir-estado-campo'].forEach((id) => {
   document.getElementById(id).addEventListener('input', dirBuscarDireccionAutomatico);
@@ -536,6 +559,8 @@ async function dirLlenarCamposDesdeUbicacion(lat, lon) {
 }
 
 document.getElementById('dir-btn-ubicacion').addEventListener('click', () => {
+  dirBusquedaId++;
+  clearTimeout(dirTemporizadorDireccion);
   if (!navigator.geolocation) {
     dirEstado.textContent = 'Tu navegador no permite compartir tu ubicación. Búscala o márcala en el mapa.';
     return;

@@ -13,6 +13,7 @@ import socket
 import sqlite3
 import subprocess
 import tempfile
+import unicodedata
 import threading
 import time as time_module
 from datetime import date, datetime, timedelta
@@ -1337,6 +1338,107 @@ def geocodificar_direccion(direccion, limite=5, codigo_postal=None):
         ]
     except Exception:
         return []
+
+
+PREFIJOS_CALLE = {
+    "calle", "av", "avenida", "cda", "cerrada", "privada", "priv", "calzada", "calz", "boulevard",
+    "blvd", "andador", "prolongacion", "prol", "callejon", "eje", "paseo", "camino", "de", "la", "el",
+}
+_cache_geocodificacion = {}
+
+
+def _normalizar_texto(texto):
+    sin_acentos = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9 ]+", " ", sin_acentos.lower())
+
+
+def _nucleo_calle(calle):
+    """El nombre de la calle sin 'Calle', 'Av.', 'Cerrada'... para compararlo con lo que devuelve el mapa."""
+    return " ".join(w for w in _normalizar_texto(calle).split() if w not in PREFIJOS_CALLE)
+
+
+def _nominatim_buscar(params, limite=5):
+    """Una búsqueda en Nominatim (con el desglose de cada dirección). Lista vacía si no hay nada o falla."""
+    consulta = {"format": "json", "limit": limite, "countrycodes": "mx", "addressdetails": 1}
+    consulta.update(params)
+    url = f"https://nominatim.openstreetmap.org/search?{urlencode(consulta)}"
+    try:
+        body = _http_get(url, headers={"User-Agent": "rutas-recoleccion-app/1.0"}, timeout=8)
+        return json.loads(body)
+    except Exception:
+        return []
+
+
+def _puntaje_resultado(d, nucleo, numero, cp):
+    direccion = d.get("address") or {}
+    calle_mapa = _normalizar_texto(
+        direccion.get("road") or direccion.get("pedestrian") or direccion.get("footway") or ""
+    ).strip()
+    if not (nucleo and calle_mapa and (nucleo in calle_mapa or calle_mapa in nucleo)):
+        return 0  # otra calle: aunque coincidan CP o número, no es la dirección que escribió
+    puntos = 2
+    if cp and direccion.get("postcode") == cp:
+        puntos += 1
+    if numero and _normalizar_texto(direccion.get("house_number", "")).strip() == _normalizar_texto(numero).strip():
+        puntos += 1
+    return puntos
+
+
+def geocodificar_direccion_cascada(calle, numero, municipio, estado, cp):
+    """Ubica en el mapa la dirección que escribió el paciente, campo por campo. Prueba, en orden:
+    búsqueda estructurada con calle+número+municipio+estado+CP, y texto libre sin la colonia (la
+    colonia casi siempre confunde a Nominatim: los nombres de colonias de OpenStreetMap rara vez
+    coinciden con los del paciente). Solo se quedan los resultados cuya calle coincide con la que se
+    escribió; si ninguno coincide, se ubica el centro del código postal (y luego el del municipio)
+    y se marca como aproximado para que el paciente ajuste el pin a mano. Devuelve
+    [{"lat", "lon", "etiqueta", "precision"}] con precision 'calle', 'cp' o 'municipio'; lista vacía
+    si no se pudo ubicar nada."""
+    llave = (calle.strip().lower(), numero.strip().lower(), municipio.strip().lower(), estado.strip().lower(), cp.strip())
+    if llave in _cache_geocodificacion:
+        return _cache_geocodificacion[llave]
+    nucleo = _nucleo_calle(calle)
+    intentos = [
+        {"street": f"{numero} {calle}".strip(), "city": municipio, "state": estado, "postalcode": cp},
+        {"q": ", ".join(x for x in (f"{calle} {numero}".strip(), municipio, estado) if x)},
+        {"q": ", ".join(x for x in (f"{calle} {numero}".strip(), f"{cp} {municipio}".strip(), estado) if x)},
+    ]
+    intentos = [{k: v for k, v in i.items() if v} for i in intentos]
+    candidatos = {}
+    for i, params in enumerate(intentos):
+        if i:
+            time_module.sleep(1.0)  # Nominatim pide máximo 1 consulta por segundo
+        for d in _nominatim_buscar(params):
+            puntos = _puntaje_resultado(d, nucleo, numero, cp)
+            if puntos >= 2:
+                candidatos[d.get("place_id")] = (puntos, d)
+        if candidatos and max(p for p, _ in candidatos.values()) >= 3:
+            break
+    if candidatos:
+        ordenados = sorted(candidatos.values(), key=lambda t: -t[0])[:5]
+        resultado = [
+            {"lat": float(d["lat"]), "lon": float(d["lon"]), "etiqueta": d.get("display_name", ""), "precision": "calle"}
+            for _, d in ordenados
+        ]
+    else:
+        resultado = []
+        for precision, params in (
+            ("cp", {"postalcode": cp, "country": "Mexico"} if cp else None),
+            ("municipio", {"q": f"{municipio}, {estado}"} if municipio else None),
+        ):
+            if params is None:
+                continue
+            time_module.sleep(1.0)
+            encontrados = _nominatim_buscar(params, limite=1)
+            if encontrados:
+                d = encontrados[0]
+                resultado = [{"lat": float(d["lat"]), "lon": float(d["lon"]),
+                              "etiqueta": d.get("display_name", ""), "precision": precision}]
+                break
+    if resultado:
+        if len(_cache_geocodificacion) > 500:
+            _cache_geocodificacion.clear()
+        _cache_geocodificacion[llave] = resultado
+    return resultado
 
 
 def geocodificar_codigo_postal(codigo_postal, limite=5):
@@ -3581,11 +3683,14 @@ def admin_geocodificar(user):
 @app.route("/cliente/geocodificar")
 @login_required("cliente")
 def cliente_geocodificar(user):
-    direccion = request.args.get("direccion", "").strip()
-    codigo_postal = request.args.get("cp", "").strip()
-    if not direccion:
-        return jsonify({"error": "Escribe una dirección."}), 400
-    resultados = geocodificar_direccion(direccion, codigo_postal=codigo_postal or None)
+    calle = request.args.get("calle", "").strip()
+    numero = request.args.get("numero", "").strip()
+    municipio = request.args.get("municipio", "").strip()
+    estado = request.args.get("estado", "").strip()
+    cp = request.args.get("cp", "").strip()
+    if not calle:
+        return jsonify({"error": "Escribe al menos la calle."}), 400
+    resultados = geocodificar_direccion_cascada(calle, numero, municipio, estado, cp)
     if not resultados:
         return jsonify({"error": "No se encontró esa dirección."}), 404
     return jsonify({"resultados": resultados})
