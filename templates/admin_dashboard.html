@@ -6,6 +6,40 @@
   <button type="submit" class="small secondary">Guardar teléfono</button>
 </form>
 {% endmacro %}
+{% macro celda_modalidad(p, volver) %}
+{% if p['alta_completa'] %}
+<form method="post" action="{{ url_for('admin_actualizar_modalidad', cliente_id=p['id']) }}">
+  <input type="hidden" name="volver" value="{{ volver }}">
+  <select name="modalidad" onchange="this.form.submit()" style="min-width:110px;">
+    <option value="compra" {% if p['modalidad_actual'] == 'compra' %}selected{% endif %}>Compra</option>
+    <option value="donacion" {% if p['modalidad_actual'] == 'donacion' %}selected{% endif %}>Donación</option>
+  </select>
+</form>
+{% else %}—{% endif %}
+{% endmacro %}
+
+{% macro celda_bote(p, volver) %}
+{% if p['solicitud_id_actual'] %}
+  {% if p['espera_entrega_bote'] %}
+  <span class="badge pendiente_entrega">Espera entrega</span>
+  {% elif p['bote_a_devolver'] %}
+  <span class="badge incidencia">Por regresar</span>
+  {% else %}
+  <form method="post" action="{{ url_for('admin_marcar_listo_recoleccion', solicitud_id=p['solicitud_id_actual']) }}"
+        onsubmit="return confirm('¿Dejar a \'{{ p['name'] }}\' listo para programarse ya en una ruta, sin esperar sus 30/60 días?');"
+        style="margin-bottom:4px;">
+    <input type="hidden" name="volver" value="{{ volver }}">
+    <button type="submit" class="small secondary">Listo para ruta</button>
+  </form>
+  <form method="post" action="{{ url_for('admin_marcar_bote_devolver', solicitud_id=p['solicitud_id_actual']) }}"
+        onsubmit="return confirm('¿Marcar que \'{{ p['name'] }}\' debe regresar el bote? Aparecerá en su próxima ruta.');">
+    <input type="hidden" name="volver" value="{{ volver }}">
+    <button type="submit" class="small secondary">Regresar bote</button>
+  </form>
+  {% endif %}
+{% else %}—{% endif %}
+{% endmacro %}
+
 {% block title %}Panel de administración{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
@@ -532,7 +566,8 @@
 <div class="tab-panel" data-tab="pacientes">
   <div class="tabs" style="margin-bottom:16px;">
     <button type="button" class="subtab-btn" data-subtab="por_revisar">Por revisar{% if por_revisar %} ({{ por_revisar|length }}){% endif %}</button>
-    <button type="button" class="subtab-btn" data-subtab="lista">Lista de pacientes</button>
+    <button type="button" class="subtab-btn" data-subtab="lista">Datos de inscripción</button>
+    <button type="button" class="subtab-btn" data-subtab="operativa">Operativa</button>
     <button type="button" class="subtab-btn" data-subtab="inscritos">Pacientes inscritos</button>
     <button type="button" class="subtab-btn" data-subtab="espera">Lista de espera{% if lista_espera %} ({{ lista_espera|length }}){% endif %}</button>
     <button type="button" class="subtab-btn" data-subtab="pendientes_ruta">Pendientes de ruta{% if pendientes_ruta %} ({{ pendientes_ruta|length }}){% endif %}</button>
@@ -577,6 +612,35 @@
   </div>
   </div>
 
+  <div class="subtab-panel" data-subtab="operativa">
+  <div class="card">
+    <h1 style="margin:0;">Pacientes — operativa</h1>
+    <p style="color:var(--muted); font-size:0.9rem;">Lo necesario para el día a día. Todos los datos de inscripción están en "Datos de inscripción".</p>
+    {% if pacientes %}
+    <input type="text" id="buscar-operativa" placeholder="Buscar por nombre o teléfono..." autocomplete="off" style="max-width:340px; margin-bottom:6px;">
+    <p id="operativa-sin-resultados" class="empty" style="display:none;">Ningún paciente coincide con la búsqueda.</p>
+    <div id="tabla-operativa" class="table-scroll">
+    <table style="min-width:0;">
+      <tr><th>Nombre</th><th>WhatsApp</th><th>Teléfono</th><th>Dirección</th><th>Modalidad</th><th>Última visita</th><th>Bote</th></tr>
+      {% for p in pacientes %}
+      <tr data-buscar="{{ (p['name'] ~ ' ' ~ (p['telefono'] or '') ~ ' ' ~ (p['telefono_actual'] or '')) | lower }}">
+        <td>{{ p['name'] }}{% if p['modalidad_actual'] == 'compra' %} 💲{% endif %}</td>
+        <td>{{ ('+52 ' + p['telefono']) if p['telefono'] else '—' }}</td>
+        <td>{{ p['telefono_actual'] or '—' }}</td>
+        <td style="white-space:normal; min-width:140px;">{{ p['direccion_actual'] or '—' }}</td>
+        <td>{{ celda_modalidad(p, 'operativa') }}</td>
+        <td style="white-space:normal;">{{ p['ultima_visita'] or 'Aún no visitada' }}</td>
+        <td>{{ celda_bote(p, 'operativa') }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+    {% else %}
+    <p class="empty">Aún no hay pacientes registrados.</p>
+    {% endif %}
+  </div>
+  </div>
+
   <div class="subtab-panel" data-subtab="inscritos">
   <div class="card">
     <h1 style="margin:0;">Pacientes inscritos</h1>
@@ -596,9 +660,10 @@
 
   <div class="subtab-panel" data-subtab="lista">
   <div class="card">
-    <h1 style="margin:0;">Pacientes</h1>
+    <h1 style="margin:0;">Datos de inscripción</h1>
     <p style="color:var(--muted); font-size:0.9rem;">
-      Perfil de tratamiento registrado por cada paciente al ingresar a la app.
+      Todo lo que cada paciente registró al ingresar a la app (perfil de tratamiento, dirección y referencias).
+      Para el trabajo del día a día usa la pestaña <strong>Operativa</strong>.
       Cupo: <strong>{{ pacientes_activos }}/{{ max_pacientes_activos }}</strong> pacientes activos.
     </p>
     {% if pacientes %}
@@ -612,7 +677,7 @@
     <p id="pacientes-sin-resultados" class="empty" style="display:none;">Ningún paciente coincide con la búsqueda.</p>
     <div id="tabla-pacientes" class="table-scroll">
     <table>
-      <tr><th>Nombre</th><th>WhatsApp (cuenta)</th><th>Teléfono (entrega)</th><th>Edad</th><th>Tipo</th><th>Marca</th><th>Frecuencia/semana</th><th>Causa</th><th>Dirección</th><th>Modalidad</th><th>Última visita</th><th>Material recolectado</th><th>Estado</th><th>Bote</th><th></th></tr>
+      <tr><th>Nombre</th><th>WhatsApp (cuenta)</th><th>Teléfono (entrega)</th><th>Edad</th><th>Tipo</th><th>Marca</th><th>Frecuencia/semana</th><th>Causa</th><th>Dirección</th><th>Código postal</th><th>Referencias</th><th>Modalidad</th><th>Última visita</th><th>Material recolectado</th><th>Fecha de alta</th><th>Estado</th><th>Bote</th><th></th></tr>
       {% for p in pacientes %}
       <tr data-buscar="{{ (p['name'] ~ ' ' ~ (p['telefono'] or '') ~ ' ' ~ (p['telefono_actual'] or '')) | lower }}">
         <td>{{ p['name'] }}{% if p['modalidad_actual'] == 'compra' %} 💲{% endif %}</td>
@@ -634,42 +699,18 @@
         <td colspan="5" style="color:var(--muted);">Aún no completa su perfil</td>
         {% endif %}
         <td>{{ p['direccion_actual'] or '—' }}</td>
-        <td>
-          {% if p['alta_completa'] %}
-          <form method="post" action="{{ url_for('admin_actualizar_modalidad', cliente_id=p['id']) }}">
-            <select name="modalidad" onchange="this.form.submit()" style="min-width:110px;">
-              <option value="compra" {% if p['modalidad_actual'] == 'compra' %}selected{% endif %}>Compra</option>
-              <option value="donacion" {% if p['modalidad_actual'] == 'donacion' %}selected{% endif %}>Donación</option>
-            </select>
-          </form>
-          {% else %}—{% endif %}
-        </td>
+        <td>{{ p['codigo_postal_actual'] or '—' }}</td>
+        <td style="min-width:200px;">{{ p['referencias_actual'] or '—' }}</td>
+        <td>{{ celda_modalidad(p, 'pacientes') }}</td>
         <td>{{ p['ultima_visita'] or 'Aún no visitada' }}</td>
         <td>{{ "%.1f"|format(p['material_recolectado_kg'] or 0) }} kg</td>
+        <td>{{ (p['fecha_alta']|cdmx)[:10] if p['fecha_alta'] else '—' }}</td>
         <td>
           {% if p['alta_completa'] %}<span class="badge programada">Alta completa</span>
           {% elif p['perfil_completo'] %}<span class="badge pendiente_entrega">Perfil sin alta</span>
           {% else %}<span class="badge pendiente">Sin iniciar</span>{% endif %}
         </td>
-        <td>
-          {% if p['solicitud_id_actual'] %}
-            {% if p['espera_entrega_bote'] %}
-            <span class="badge pendiente_entrega">Espera entrega</span>
-            {% elif p['bote_a_devolver'] %}
-            <span class="badge incidencia">Por regresar</span>
-            {% else %}
-            <form method="post" action="{{ url_for('admin_marcar_listo_recoleccion', solicitud_id=p['solicitud_id_actual']) }}"
-                  onsubmit="return confirm('¿Dejar a \'{{ p['name'] }}\' listo para programarse ya en una ruta, sin esperar sus 30/60 días?');"
-                  style="margin-bottom:4px;">
-              <button type="submit" class="small secondary">Listo para ruta</button>
-            </form>
-            <form method="post" action="{{ url_for('admin_marcar_bote_devolver', solicitud_id=p['solicitud_id_actual']) }}"
-                  onsubmit="return confirm('¿Marcar que \'{{ p['name'] }}\' debe regresar el bote? Aparecerá en su próxima ruta.');">
-              <button type="submit" class="small secondary">Regresar bote</button>
-            </form>
-            {% endif %}
-          {% else %}—{% endif %}
-        </td>
+        <td>{{ celda_bote(p, 'pacientes') }}</td>
         <td>
           <form method="post" action="{{ url_for('admin_eliminar_paciente', cliente_id=p['id']) }}"
                 onsubmit="return confirm('¿Eliminar a \'{{ p['name'] }}\' permanentemente del sistema? Esto borra su cuenta, sus solicitudes y su historial. No se puede deshacer.');">
@@ -1640,6 +1681,7 @@ const TAB_ALIAS = {
   espera: {tab: 'pacientes', subtab: 'espera'},
   pendientes_ruta: {tab: 'pacientes', subtab: 'pendientes_ruta'},
   por_revisar: {tab: 'pacientes', subtab: 'por_revisar'},
+  operativa: {tab: 'pacientes', subtab: 'operativa'},
   dinero: {tab: 'dinero', subtab: 'ingreso'},
   ingreso: {tab: 'dinero', subtab: 'ingreso'},
   egreso: {tab: 'dinero', subtab: 'egreso'},
@@ -1705,20 +1747,22 @@ if (btnPacientesIzq) {
   btnPacientesDer.addEventListener('click', () => document.getElementById('tabla-pacientes').scrollBy({left: 300, behavior: 'smooth'}));
 }
 
-const buscarPacientes = document.getElementById('buscar-pacientes');
-if (buscarPacientes) {
-  buscarPacientes.addEventListener('input', () => {
-    const q = buscarPacientes.value.trim().toLowerCase();
-    const filas = document.querySelectorAll('#tabla-pacientes tr[data-buscar]');
+function activarBusquedaPacientes(inputId, tablaId, vacioId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
     let visibles = 0;
-    filas.forEach((fila) => {
+    document.querySelectorAll('#' + tablaId + ' tr[data-buscar]').forEach((fila) => {
       const coincide = !q || fila.dataset.buscar.indexOf(q) !== -1;
       fila.style.display = coincide ? '' : 'none';
       if (coincide) visibles++;
     });
-    document.getElementById('pacientes-sin-resultados').style.display = visibles === 0 ? 'block' : 'none';
+    document.getElementById(vacioId).style.display = visibles === 0 ? 'block' : 'none';
   });
 }
+activarBusquedaPacientes('buscar-pacientes', 'tabla-pacientes', 'pacientes-sin-resultados');
+activarBusquedaPacientes('buscar-operativa', 'tabla-operativa', 'operativa-sin-resultados');
 
 function activarDropzoneVideo(dropzoneId, textoId, archivoId, inputId) {
   const dropzone = document.getElementById(dropzoneId);

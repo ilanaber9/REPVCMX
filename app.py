@@ -3530,12 +3530,15 @@ def admin_dashboard(user):
     for p in pacientes_rows:
         paciente = dict(p)
         ruta_sol = db.execute(
-            "SELECT id AS solicitud_id, direccion, telefono, modalidad, estado, bote_a_devolver "
-            "FROM solicitudes WHERE cliente_id = ? "
+            "SELECT id AS solicitud_id, direccion, codigo_postal, referencias, created_at, telefono, "
+            "modalidad, estado, bote_a_devolver FROM solicitudes WHERE cliente_id = ? "
             "ORDER BY (tipo_redistribucion IS NOT NULL), created_at DESC LIMIT 1",
             (p["id"],),
         ).fetchone()
         paciente["direccion_actual"] = ruta_sol["direccion"] if ruta_sol else None
+        paciente["codigo_postal_actual"] = ruta_sol["codigo_postal"] if ruta_sol else None
+        paciente["referencias_actual"] = ruta_sol["referencias"] if ruta_sol else None
+        paciente["fecha_alta"] = ruta_sol["created_at"] if ruta_sol else None
         paciente["telefono_actual"] = (ruta_sol["telefono"] if ruta_sol else None) or paciente["telefono"]
         paciente["modalidad_actual"] = ruta_sol["modalidad"] if ruta_sol else None
         paciente["solicitud_id_actual"] = ruta_sol["solicitud_id"] if ruta_sol else None
@@ -4209,24 +4212,30 @@ def admin_eliminar_paciente(user, cliente_id):
     return redirect(url_for("admin_dashboard", tab="pacientes"))
 
 
+def _tab_volver():
+    """A qué pestaña de pacientes regresar después de una acción: la que la mandó (la lista
+    completa o la operativa), para no sacar al admin de donde estaba trabajando."""
+    return "operativa" if request.form.get("volver") == "operativa" else "pacientes"
+
+
 @app.route("/admin/pacientes/<int:cliente_id>/modalidad", methods=["POST"])
 @login_required("admin")
 def admin_actualizar_modalidad(user, cliente_id):
     modalidad = request.form.get("modalidad")
     if modalidad not in ("compra", "donacion"):
         flash("Modalidad inválida.", "error")
-        return redirect(url_for("admin_dashboard", tab="pacientes"))
+        return redirect(url_for("admin_dashboard", tab=_tab_volver()))
     db = get_db()
     paciente = db.execute(
         "SELECT * FROM users WHERE id = ? AND role = 'cliente'", (cliente_id,)
     ).fetchone()
     if paciente is None:
         flash("Ese paciente ya no existe.", "error")
-        return redirect(url_for("admin_dashboard", tab="pacientes"))
+        return redirect(url_for("admin_dashboard", tab=_tab_volver()))
     db.execute("UPDATE solicitudes SET modalidad = ? WHERE cliente_id = ?", (modalidad, cliente_id))
     db.commit()
     flash(f"'{paciente['name']}' quedó marcado como {'Compra' if modalidad == 'compra' else 'Donación'}.", "success")
-    return redirect(url_for("admin_dashboard", tab="pacientes"))
+    return redirect(url_for("admin_dashboard", tab=_tab_volver()))
 
 
 @app.route("/admin/solicitudes/<int:solicitud_id>/regresar-bote", methods=["POST"])
@@ -4236,12 +4245,12 @@ def admin_marcar_bote_devolver(user, solicitud_id):
     sol = db.execute("SELECT * FROM solicitudes WHERE id = ?", (solicitud_id,)).fetchone()
     if sol is None:
         flash("Esa solicitud ya no existe.", "error")
-        return redirect(url_for("admin_dashboard", tab="pacientes"))
+        return redirect(url_for("admin_dashboard", tab=_tab_volver()))
     db.execute("UPDATE solicitudes SET bote_a_devolver = 1 WHERE id = ?", (solicitud_id,))
     db.commit()
     nombre = sol["nombre_contacto"] or sol["direccion"]
     flash(f"Se marcó que '{nombre}' debe regresar el bote — aparecerá en su próxima ruta.", "success")
-    return redirect(url_for("admin_dashboard", tab="pacientes"))
+    return redirect(url_for("admin_dashboard", tab=_tab_volver()))
 
 
 @app.route("/admin/solicitudes/<int:solicitud_id>/revisar", methods=["POST"])
@@ -4300,18 +4309,18 @@ def admin_marcar_listo_recoleccion(user, solicitud_id):
     sol = db.execute("SELECT * FROM solicitudes WHERE id = ?", (solicitud_id,)).fetchone()
     if sol is None:
         flash("Esa solicitud ya no existe.", "error")
-        return redirect(url_for("admin_dashboard", tab="pacientes"))
+        return redirect(url_for("admin_dashboard", tab=_tab_volver()))
     nombre = sol["nombre_contacto"] or sol["direccion"]
     if sol["cliente_id"]:
         u = db.execute("SELECT name FROM users WHERE id = ?", (sol["cliente_id"],)).fetchone()
         nombre = u["name"] if u else nombre
     if sol["estado"] not in ("pendiente", "pendiente_entrega"):
         flash(f"'{nombre}' está en otro estado ({sol['estado']}) y no se puede marcar como listo ahora.", "error")
-        return redirect(url_for("admin_dashboard", tab="pacientes"))
+        return redirect(url_for("admin_dashboard", tab=_tab_volver()))
     db.execute("UPDATE solicitudes SET fecha_reinicio_espera = NULL WHERE id = ?", (solicitud_id,))
     db.commit()
     flash(f"'{nombre}' quedó listo para programarse en una ruta.", "success")
-    return redirect(url_for("admin_dashboard", tab="pacientes"))
+    return redirect(url_for("admin_dashboard", tab=_tab_volver()))
 
 
 def registrar_movimiento_botes(db, tipo, cantidad, notas=None):
@@ -5630,8 +5639,8 @@ def admin_exportar_pacientes(user):
     filas = []
     for p in pacientes_rows:
         ruta_sol = db.execute(
-            "SELECT direccion, telefono, modalidad FROM solicitudes WHERE cliente_id = ? "
-            "ORDER BY (tipo_redistribucion IS NOT NULL), created_at DESC LIMIT 1",
+            "SELECT direccion, codigo_postal, referencias, created_at, telefono, modalidad FROM solicitudes "
+            "WHERE cliente_id = ? ORDER BY (tipo_redistribucion IS NOT NULL), created_at DESC LIMIT 1",
             (p["id"],),
         ).fetchone()
         ultima_visita = db.execute(
@@ -5643,24 +5652,29 @@ def admin_exportar_pacientes(user):
         filas.append([
             p["name"],
             p["telefono"] or "—",
+            (ruta_sol["telefono"] if ruta_sol else None) or p["telefono"] or "—",
             p["edad"] or "—",
             "Máquina" if p["tipo_maquina"] == "maquina" else "Manual" if p["tipo_maquina"] else "—",
             "Baxter" if p["marca"] == "baxter" else "Pisa" if p["marca"] else "—",
             p["frecuencia_semana"] or "—",
             CAUSA_ENFERMEDAD_LABELS.get(p["causa_enfermedad"], "—"),
             (ruta_sol["direccion"] if ruta_sol else None) or "—",
+            (ruta_sol["codigo_postal"] if ruta_sol else None) or "—",
+            (ruta_sol["referencias"] if ruta_sol else None) or "—",
             "Compra" if (ruta_sol and ruta_sol["modalidad"]) == "compra"
             else "Donación" if (ruta_sol and ruta_sol["modalidad"]) == "donacion" else "—",
             ultima_visita["fecha"] if ultima_visita else "Aún no visitado",
             round(p["material_recolectado_kg"] or 0, 1),
+            (utc_a_cdmx(ruta_sol["created_at"])[:10] if ruta_sol and ruta_sol["created_at"] else "—"),
             "Alta completa" if p["alta_completa"] else "Perfil sin alta" if p["perfil_completo"] else "Sin iniciar",
         ])
     wb = Workbook()
     wb.remove(wb.active)
     agregar_hoja_excel(
         wb, "Pacientes",
-        ["Nombre", "WhatsApp", "Edad", "Tipo", "Marca", "Frecuencia/semana", "Causa", "Dirección",
-         "Modalidad", "Última visita", "Material recolectado (kg)", "Estado"],
+        ["Nombre", "WhatsApp", "Teléfono (entrega)", "Edad", "Tipo", "Marca", "Frecuencia/semana", "Causa",
+         "Dirección", "Código postal", "Referencias", "Modalidad", "Última visita",
+         "Material recolectado (kg)", "Fecha de alta", "Estado"],
         filas,
     )
     return respuesta_excel(wb, f"pacientes_{ahora_negocio().date().isoformat()}.xlsx")
