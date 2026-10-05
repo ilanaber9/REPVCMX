@@ -49,14 +49,24 @@
   }
   .nav-tabs-toggle:hover { background: none; }
   .nav-tabs-toggle svg { width: 24px; height: 24px; display: block; }
-  .nav-tabs-links { display: flex; gap: 20px; align-items: center; }
+  .nav-tabs-links { display: flex; gap: 16px; align-items: center; }
   .nav-tabs-links a {
-    color: white; opacity: 0.9; font-size: 0.9rem; font-weight: 600; text-decoration: none;
+    color: white; opacity: 0.9; font-size: 0.85rem; font-weight: 600; text-decoration: none;
     white-space: nowrap;
   }
+  /* Menú centrado en la pantalla: ocupa el espacio entre el logo y el borde, y un espaciador del
+     ancho del logo (40px de alto, 375x188 -> 80px de ancho) del lado derecho equilibra las
+     dos orillas para que el centro del menú sea el centro real de la página. */
+  header.topbar .nav-right { flex: 1; justify-content: center; }
+  header.topbar::after { content: ""; flex: 0 0 80px; }
   .nav-tabs-links a:hover { opacity: 1; text-decoration: underline; }
 
-  @media (max-width: 780px) {
+  /* Los 6 links miden ~855px y, con el logo y el espaciador de cada lado, necesitan ~1060px de
+     pantalla: por debajo de 1100px ya no caben, y se esconden detrás del botón de 3 rayas. */
+  @media (max-width: 1100px) {
+    header.topbar .nav-right { flex: none; justify-content: flex-end; }
+    header.topbar::after { display: none; }
+    header.topbar { justify-content: space-between; }
     .nav-tabs-toggle { display: block; }
     .nav-tabs-links {
       display: none; position: absolute; top: 100%; right: 0; margin-top: 10px; min-width: 230px;
