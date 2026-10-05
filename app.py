@@ -136,8 +136,9 @@ HORA_CORTE_AVISOS_NOCTURNO = _hora_corte_avisos()  # después de esta hora, un a
 HORA_ENVIO_AVISOS_MATUTINO = dtime(7, 0)
 
 # Plazos para que un paciente confirme si podrá recibir su recolección/entrega programada antes
-# de que se reasigne al siguiente más cercano (ver _calcular_vencimiento_confirmacion): primero
-# hasta las 2pm, luego hasta las 9pm; después de las 9pm ya no hay más plazo que ofrecer -- el
+# de que se reasigne al siguiente más cercano (ver _calcular_vencimiento_confirmacion). Son SIEMPRE
+# del día previo a la ruta, sin importar con cuánta anticipación se programó: primero hasta las 2pm
+# de ese día, luego hasta las 9pm; después de las 9pm ya no hay cancelación automática -- el
 # recolector maneja en campo lo que encuentre, igual que cualquier ausencia hoy.
 HORA_LIMITE_CONFIRMACION_1 = dtime(14, 0)
 HORA_LIMITE_CONFIRMACION_2 = dtime(21, 0)
@@ -164,26 +165,22 @@ def ahora_negocio_local():
     return ahora_negocio().replace(tzinfo=None)
 
 
-def _calcular_vencimiento_confirmacion(ahora, fecha_ruta, hora_salida):
-    """Calcula el plazo límite para que un paciente confirme su parada: el primero en notificarse
-    tiene hasta HORA_LIMITE_CONFIRMACION_1 (2pm); si se reasigna, el siguiente tiene hasta
-    HORA_LIMITE_CONFIRMACION_2 (9pm); si se vuelve a reasignar, el siguiente tiene hasta la hora
-    de salida de la ruta -- después de eso ya no hay más plazo que ofrecer (ver
-    procesar_confirmaciones_vencidas). Se escoge el más próximo de los tres que todavía no haya
-    pasado respecto a `ahora` (no un orden fijo 1/2/salida), para que una ruta armada tarde en el
-    día (p. ej. a las 4pm) no intente ofrecer un plazo de las 2pm que ya pasó -- cae directo en el
-    plazo de las 9pm, que es el siguiente que de verdad aplica."""
-    try:
-        h, m = (int(x) for x in hora_salida.split(":"))
-    except (ValueError, AttributeError):
-        h, m = 8, 0
-    fecha = datetime.strptime(fecha_ruta, "%Y-%m-%d").date()
-    salida_ruta = datetime.combine(fecha, dtime(h, m))
+def _calcular_vencimiento_confirmacion(ahora, fecha_ruta):
+    """Plazo límite para que un paciente confirme su parada, anclado al DÍA PREVIO a la ruta (no al
+    día en que se le avisa): el primero en notificarse tiene hasta HORA_LIMITE_CONFIRMACION_1 (2pm)
+    del día previo; si se reasigna, el siguiente tiene hasta HORA_LIMITE_CONFIRMACION_2 (9pm) de ese
+    mismo día. Así, una ruta programada 3 días antes da tiempo de confirmar hasta las 2pm del día
+    previo, y no se cancela antes. Se escoge el más próximo de los dos que todavía no haya pasado
+    respecto a `ahora` (una ruta armada o reasignada después de las 2pm del día previo cae
+    directo en el plazo de las 9pm). Pasadas las 9pm del día previo, o si la ruta es de hoy, ya no
+    hay cancelación automática (devuelve None): quien quede pendiente puede contestar hasta que
+    salga la ruta y el recolector maneja en campo lo que encuentre (ver
+    procesar_confirmaciones_vencidas)."""
+    previo = datetime.strptime(fecha_ruta, "%Y-%m-%d").date() - timedelta(days=1)
     candidatos = sorted(
         dt for dt in (
-            ahora.replace(hour=HORA_LIMITE_CONFIRMACION_1.hour, minute=HORA_LIMITE_CONFIRMACION_1.minute, second=0, microsecond=0),
-            ahora.replace(hour=HORA_LIMITE_CONFIRMACION_2.hour, minute=HORA_LIMITE_CONFIRMACION_2.minute, second=0, microsecond=0),
-            salida_ruta,
+            datetime.combine(previo, HORA_LIMITE_CONFIRMACION_1),
+            datetime.combine(previo, HORA_LIMITE_CONFIRMACION_2),
         )
         if dt > ahora
     )
@@ -1060,7 +1057,7 @@ def _notificar_paradas_programadas(parada_ids):
                 continue
 
             token = secrets.token_urlsafe(24)
-            vencimiento = _calcular_vencimiento_confirmacion(ahora_negocio_local(), parada["fecha"], parada["hora_salida"])
+            vencimiento = _calcular_vencimiento_confirmacion(ahora_negocio_local(), parada["fecha"])
             conn.execute(
                 "UPDATE paradas SET confirmacion_token = ?, confirmacion_vencimiento = ? WHERE id = ?",
                 (token, vencimiento.strftime("%Y-%m-%d %H:%M:%S") if vencimiento else None, parada_id),
@@ -1507,9 +1504,9 @@ def procesar_confirmaciones_vencidas():
     venció sin que el paciente contestara 'sí' o 'no', y las trata igual que si el paciente hubiera
     dicho que no: las saca de la ruta y busca al siguiente paciente más cercano para llenar el
     hueco -- a ese siguiente candidato le toca la ventana que siga (ver
-    _notificar_paradas_programadas), y así hasta la ventana de la hora de salida, donde ya no hay
-    más plazo que ofrecer y el recolector maneja en campo lo que encuentre, igual que cualquier
-    ausencia de hoy. Corre desde un hilo en segundo plano (ver _hilo_confirmaciones_vencidas).
+    _notificar_paradas_programadas): 2pm del día previo, luego 9pm; después de las 9pm ya no
+    hay más cancelación automática y el recolector maneja en campo lo que encuentre, igual que
+    cualquier ausencia de hoy. Corre desde un hilo en segundo plano (ver _hilo_confirmaciones_vencidas).
     Reclama cada parada con un UPDATE condicionado antes de actuar, para que si hay más de un
     proceso de gunicorn corriendo este mismo chequeo a la vez, cada una solo se procese una vez
     (mismo patrón que procesar_avisos_programados)."""
@@ -2218,6 +2215,24 @@ def aplicar_migraciones_pendientes():
         "  aplicada_en TEXT DEFAULT (datetime('now','localtime'))"
         ")"
     )
+    ya_aplicada_plazos = db.execute(
+        "SELECT 1 FROM migraciones_una_vez WHERE clave = ?", ("plazos_confirmacion_dia_previo",)
+    ).fetchone()
+    if not ya_aplicada_plazos and "confirmacion_vencimiento" in {r["name"] for r in db.execute("PRAGMA table_info(paradas)")}:
+        # Los plazos guardados antes se calcularon con el día en que se avisó (2pm de ESE día), así que
+        # una ruta de dentro de varios días podía cancelarse antes de tiempo. Se recalculan con el día
+        # previo a su ruta; los que ya se procesaron (plazo vacío) no se tocan.
+        ahora_plazos = ahora_negocio_local()
+        for fila in db.execute(
+            "SELECT p.id, r.fecha FROM paradas p JOIN rutas r ON r.id = p.ruta_id "
+            "WHERE p.estado = 'pendiente' AND p.confirmado_paciente IS NULL AND p.confirmacion_vencimiento IS NOT NULL"
+        ).fetchall():
+            nuevo_plazo = _calcular_vencimiento_confirmacion(ahora_plazos, fila["fecha"])
+            db.execute(
+                "UPDATE paradas SET confirmacion_vencimiento = ? WHERE id = ?",
+                (nuevo_plazo.strftime("%Y-%m-%d %H:%M:%S") if nuevo_plazo else None, fila["id"]),
+            )
+        db.execute("INSERT INTO migraciones_una_vez (clave) VALUES (?)", ("plazos_confirmacion_dia_previo",))
     ya_aplicada = db.execute(
         "SELECT 1 FROM migraciones_una_vez WHERE clave = ?", ("backfill_fecha_reinicio_espera_entrega_bote",)
     ).fetchone()
