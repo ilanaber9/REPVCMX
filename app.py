@@ -3296,7 +3296,7 @@ def cliente_telefono_solicitar_codigo(user):
     -- así nadie deja una cuenta atada a un número que no es suyo, ni le llegan los avisos de
     ruta a otra persona."""
     nuevo = telefono_identidad(request.form.get("telefono", ""))
-    volver = redirect(url_for("cliente_dashboard", tab="direccion"))
+    volver = redirect(url_for("cliente_dashboard", tab="datos", sub="whatsapp"))
     if nuevo is None:
         flash("Escribe un número de WhatsApp válido de 10 dígitos.", "error")
         return volver
@@ -3341,7 +3341,7 @@ def cliente_telefono_solicitar_codigo(user):
 @app.route("/cliente/telefono/confirmar-codigo", methods=["POST"])
 @login_required("cliente")
 def cliente_telefono_confirmar_codigo(user):
-    volver = redirect(url_for("cliente_dashboard", tab="direccion"))
+    volver = redirect(url_for("cliente_dashboard", tab="datos", sub="whatsapp"))
     codigo = request.form.get("codigo", "").strip()
     ahora_texto = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
     if not user["telefono_nuevo"] or not user["telefono_nuevo_expira"] or user["telefono_nuevo_expira"] <= ahora_texto:
@@ -3384,14 +3384,14 @@ def cliente_actualizar_direccion(user):
     ).fetchone()
     if sol is None:
         flash("No encontramos tu solicitud — contáctanos directamente.", "error")
-        return redirect(url_for("cliente_dashboard", tab="direccion"))
+        return redirect(url_for("cliente_dashboard", tab="datos", sub="direccion"))
     if sol["estado"] == "programada":
         flash(
             "Tu recolección ya está programada con esta dirección, así que no se puede cambiar "
             "aquí — escríbenos directamente si necesitas actualizarla.",
             "error",
         )
-        return redirect(url_for("cliente_dashboard", tab="direccion"))
+        return redirect(url_for("cliente_dashboard", tab="datos", sub="direccion"))
 
     calle = request.form.get("calle", "").strip()
     numero = request.form.get("numero", "").strip()
@@ -3401,12 +3401,12 @@ def cliente_actualizar_direccion(user):
     estado_direccion = request.form.get("estado", "").strip()
     if not all([calle, numero, colonia, municipio, codigo_postal, estado_direccion]):
         flash("Completa todos los campos de la dirección (calle, número, colonia, municipio o alcaldía, código postal y estado).", "error")
-        return redirect(url_for("cliente_dashboard", tab="direccion"))
+        return redirect(url_for("cliente_dashboard", tab="datos", sub="direccion"))
     direccion = f"{calle} {numero}, {colonia}, {municipio}, {estado_direccion}"
     referencias = request.form.get("referencias", "").strip()
     if not referencias:
         flash("Escribe una referencia de tu domicilio (color de la fachada, frente a qué local está...).", "error")
-        return redirect(url_for("cliente_dashboard", tab="direccion"))
+        return redirect(url_for("cliente_dashboard", tab="datos", sub="direccion"))
     lat = request.form.get("lat", "").strip()
     lon = request.form.get("lon", "").strip()
     try:
@@ -3418,7 +3418,7 @@ def cliente_actualizar_direccion(user):
     if lat is not None and lon is not None:
         if direccion_ya_registrada(db, lat, lon, excluir_id=sol["id"]):
             flash("Esa dirección ya está registrada con otro paciente.", "error")
-            return redirect(url_for("cliente_dashboard", tab="direccion"))
+            return redirect(url_for("cliente_dashboard", tab="datos", sub="direccion"))
         if fuera_de_cobertura(db, lat, lon):
             # Mismo criterio que al darse de alta: si la nueva ubicación no tiene cobertura, no
             # se guarda el cambio -- se queda con la dirección que ya tenía.
@@ -3427,7 +3427,7 @@ def cliente_actualizar_direccion(user):
                 "a esa ubicación. Tu dirección anterior se queda sin cambios.",
                 "error",
             )
-            return redirect(url_for("cliente_dashboard", tab="direccion"))
+            return redirect(url_for("cliente_dashboard", tab="datos", sub="direccion"))
 
     db.execute(
         "UPDATE solicitudes SET direccion = ?, codigo_postal = ?, referencias = ?, lat = ?, lon = ? WHERE id = ?",
@@ -3436,7 +3436,7 @@ def cliente_actualizar_direccion(user):
     crear_notificacion_admin(db, user["id"], f"'{user['name']}' actualizó su dirección — {direccion}.")
     db.commit()
     flash("Tu dirección se actualizó correctamente.", "success")
-    return redirect(url_for("cliente_dashboard", tab="direccion"))
+    return redirect(url_for("cliente_dashboard", tab="datos", sub="direccion"))
 
 
 # ---------- Admin ----------

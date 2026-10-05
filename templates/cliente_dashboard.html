@@ -8,7 +8,7 @@
 
 <div class="tabs">
   <button type="button" class="tab-btn" data-tab="notificaciones">Notificaciones</button>
-  <button type="button" class="tab-btn" data-tab="direccion">Actualización de dirección</button>
+  <button type="button" class="tab-btn" data-tab="datos">Actualización de datos</button>
   <button type="button" class="tab-btn" data-tab="material">Material recolectado</button>
   <button type="button" class="tab-btn" data-tab="cajas">Mis cajas</button>
   <button type="button" class="tab-btn" data-tab="redistribucion">Redistribución de cajas</button>
@@ -114,9 +114,17 @@
   {% endif %}
 </div>
 
-<div class="tab-panel" data-tab="direccion">
+<div class="tab-panel" data-tab="datos">
+  <h1 style="margin:0 0 4px;">Actualización de datos</h1>
+  <p style="color:var(--muted); font-size:0.9rem; margin:0 0 10px;">¿Qué quieres actualizar?</p>
+  <div class="tabs" style="margin-bottom:16px;">
+    <button type="button" class="subtab-btn" data-subtab="direccion">Dirección</button>
+    <button type="button" class="subtab-btn" data-subtab="whatsapp">WhatsApp</button>
+  </div>
+
+  <div class="subtab-panel" data-subtab="direccion">
   <div class="card">
-    <h1 style="margin:0;">Actualización de dirección</h1>
+    <h1 style="margin:0;">Dirección</h1>
     {% if not solicitud_principal %}
     <p class="empty">No encontramos tu solicitud de recolección — contáctanos directamente.</p>
     {% elif solicitud_principal['estado'] == 'programada' %}
@@ -186,8 +194,10 @@
     </form>
     {% endif %}
   </div>
+  </div>
 
-  <div class="card" style="margin-top:14px;">
+  <div class="subtab-panel" data-subtab="whatsapp">
+  <div class="card">
     <h1 style="margin:0;">Número de WhatsApp</h1>
     <p style="color:var(--muted); font-size:0.9rem;">
       Tu número actual: <strong>{{ current_user['telefono'] or '—' }}</strong>. Aquí es donde te llegan los avisos de tu recolección.
@@ -210,6 +220,7 @@
       <input type="tel" name="telefono" maxlength="14" pattern="[0-9 ]{10,14}" inputmode="numeric" required style="max-width:220px;" placeholder="55 1234 5678">
       <button type="submit" class="secondary" style="margin-top:10px;">Enviar código</button>
     </form>
+  </div>
   </div>
 </div>
 
@@ -607,15 +618,29 @@ document.querySelectorAll('input[name="modo-entrega"]').forEach((r) => {
 </script>
 
 <script>
-function activarTab(tab) {
+var subDatosActual = 'direccion';
+function activarSubtab(sub) {
+  if (sub !== 'direccion' && sub !== 'whatsapp') sub = 'direccion';
+  subDatosActual = sub;
+  var panel = document.querySelector('.tab-panel[data-tab="datos"]');
+  panel.querySelectorAll('.subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab === sub));
+  panel.querySelectorAll('.subtab-panel').forEach(p => p.classList.toggle('active', p.dataset.subtab === sub));
+  // el mapa se armó con la pestaña escondida: hay que decirle que ya tiene tamaño
+  if (sub === 'direccion' && typeof mapaDireccion !== 'undefined') setTimeout(function () { mapaDireccion.invalidateSize(); }, 50);
+}
+function activarTab(tab, sub) {
+  if (tab === 'direccion') { tab = 'datos'; sub = sub || 'direccion'; }  // enlaces de antes
   var valido = Array.from(document.querySelectorAll('.tab-btn')).some(b => b.dataset.tab === tab);
   if (!valido) tab = 'notificaciones';
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
+  if (tab === 'datos') activarSubtab(sub || subDatosActual);
   if (tab === 'nef') marcarNefVisto();
 }
 document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => activarTab(b.dataset.tab)));
-activarTab(new URLSearchParams(location.search).get('tab') || 'notificaciones');
+document.querySelectorAll('.subtab-btn').forEach(b => b.addEventListener('click', () => activarSubtab(b.dataset.subtab)));
+var parametrosUrl = new URLSearchParams(location.search);
+activarTab(parametrosUrl.get('tab') || 'notificaciones', parametrosUrl.get('sub'));
 
 var nefYaMarcado = false;
 function marcarNefVisto() {
