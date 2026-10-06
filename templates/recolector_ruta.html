@@ -78,7 +78,7 @@
     {% if not ruta['hora_inicio_real'] %}
     <li class="parada-accion" style="text-align:center;">
       <strong style="font-size:1.1rem;">🚚 Antes de la primera parada</strong><br>
-      <form method="post" action="{{ url_for('recolector_iniciar_ruta', ruta_id=ruta['id']) }}" style="margin-top:10px;">
+      <form method="post" data-offline action="{{ url_for('recolector_iniciar_ruta', ruta_id=ruta['id']) }}" style="margin-top:10px;">
         <button type="submit" style="font-size:1.05rem; padding:12px 28px;">Iniciar ruta</button>
       </form>
     </li>
@@ -116,14 +116,14 @@
            href="https://www.google.com/maps/dir/?api=1&destination={{ p['direccion'] | urlencode }}">Google Maps</a>
         {% endif %}
         {% if p['bote_a_devolver'] %}
-        <form class="inline" method="post" action="{{ url_for('recolector_bote_devuelto', parada_id=p['id']) }}">
+        <form class="inline" method="post" data-offline action="{{ url_for('recolector_bote_devuelto', parada_id=p['id']) }}">
           <button type="submit" class="small">🪣 Bote recibido</button>
         </form>
         {% endif %}
       </div>
 
       {% if p['estado'] == 'pendiente' %}
-      <form class="estado-form" method="post" action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
+      <form class="estado-form" method="post" data-offline action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
         <input type="hidden" name="parte" value="principal">
         <input type="text" name="notas" placeholder="Notas (opcional)" value="{{ p['notas'] or '' }}" style="flex:1; min-width:160px;">
         <label style="display:flex; flex-direction:column; font-size:0.75rem; color:var(--muted); gap:2px;">
@@ -162,7 +162,7 @@
       <div style="margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);">
         <span style="font-size:0.8rem; color:var(--muted);">Segunda solicitud en esta visita:</span>
         {% if p['estado_extra'] == 'pendiente' %}
-        <form class="estado-form" method="post" action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
+        <form class="estado-form" method="post" data-offline action="{{ url_for('recolector_actualizar_parada', parada_id=p['id']) }}">
           <input type="hidden" name="parte" value="extra">
           {% if p['estado'] != 'pendiente' %}
           {# el kg de la visita se captura una sola vez: aquí solo si la primera parte ya se cerró #}
@@ -203,7 +203,7 @@
     {% if ruta['hora_inicio_real'] and not ruta['hora_fin_real'] %}
     <li class="parada-accion" style="text-align:center;">
       <strong style="font-size:1.1rem;">🏁 Después de la última parada</strong><br>
-      <form method="post" action="{{ url_for('recolector_finalizar_ruta', ruta_id=ruta['id']) }}"
+      <form method="post" data-offline action="{{ url_for('recolector_finalizar_ruta', ruta_id=ruta['id']) }}"
             onsubmit="return confirm('¿Finalizar la ruta? Se guardará el tiempo real que te tomó.');" style="margin-top:10px;">
         <button type="submit" class="danger" style="font-size:1.05rem; padding:12px 28px;">Finalizar ruta</button>
       </form>

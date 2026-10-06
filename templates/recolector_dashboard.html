@@ -10,6 +10,8 @@
 <div class="tab-panel" data-tab="rutas">
   <div class="card">
     <h1>Mis rutas asignadas</h1>
+    <p id="rutas-sin-senal" style="color:var(--muted); font-size:0.85rem; margin:0 0 8px;"></p>
+    <button type="button" id="instalar-app" class="small secondary" style="display:none; margin-bottom:8px;">📲 Instalar la app en mi celular</button>
     {% if rutas %}
     <table>
       <tr><th>Nombre</th><th>Fecha</th><th>Progreso</th><th>Estado</th><th></th></tr>
@@ -19,7 +21,7 @@
         <td>{{ r['fecha'] }}</td>
         <td>{{ r['paradas_hechas'] }}/{{ r['total_paradas'] }}</td>
         <td><span class="badge {{ 'suspendida' if r['suspendida'] else r['estado'] }}">{{ 'suspendida' if r['suspendida'] else r['estado'] }}</span></td>
-        <td><a class="btn small" href="{{ url_for('recolector_ver_ruta', ruta_id=r['id']) }}">Ver</a></td>
+        <td><a class="btn small" href="{{ url_for('recolector_ver_ruta', ruta_id=r['id']) }}"{% if r['estado'] != 'completada' %} data-guardar-sin-senal{% endif %}>Ver</a></td>
       </tr>
       {% endfor %}
     </table>
@@ -35,7 +37,7 @@
     <p style="color:var(--muted); font-size:0.9rem;">
       Registra tu hora de entrada y salida de cada día. La jornada normal es de 8 horas; lo que pase de ahí se cuenta como tiempo extra.
     </p>
-    <form method="post" action="{{ url_for('recolector_registrar_horas_extra') }}">
+    <form method="post" data-offline action="{{ url_for('recolector_registrar_horas_extra') }}">
       <label>Fecha</label>
       <input type="date" name="fecha" value="{{ hoy if hoy else '' }}" required>
       <label>Hora de entrada</label>

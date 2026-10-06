@@ -5,6 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Rutas de Recolección{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta name="theme-color" content="#1f7a4d">
+  <link rel="manifest" href="{{ url_for('manifest') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  {% if current_user and current_user['role'] == 'recolector' %}
+  <script src="{{ url_for('static', filename='offline.js') }}" defer></script>
+  {% endif %}
   {% block head %}{% endblock %}
 </head>
 <body>

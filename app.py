@@ -31,7 +31,10 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlencode, urlparse
 
-from flask import Flask, abort, g, jsonify, redirect, render_template, request, session, url_for, flash, send_file
+from flask import (
+    Flask, abort, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session,
+    url_for, flash,
+)
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
@@ -2310,6 +2313,34 @@ def inject_user():
 
 # ---------- General ----------
 
+@app.route("/manifest.webmanifest")
+def manifest():
+    """Datos para instalar la app en el celular (Chrome > Instalar app)."""
+    respuesta = jsonify({
+        "name": "RE-PVC Recolección", "short_name": "RE-PVC", "lang": "es-MX",
+        "start_url": "/recolector", "scope": "/", "display": "standalone",
+        "background_color": "#ffffff", "theme_color": "#1f7a4d",
+        "icons": [
+            {"src": url_for("static", filename="icons/icon-192.png"), "sizes": "192x192", "type": "image/png"},
+            {"src": url_for("static", filename="icons/icon-512.png"), "sizes": "512x512", "type": "image/png"},
+            {"src": url_for("static", filename="icons/icon-maskable-512.png"), "sizes": "512x512",
+             "type": "image/png", "purpose": "maskable"},
+        ],
+    })
+    respuesta.headers["Content-Type"] = "application/manifest+json"
+    return respuesta
+
+
+@app.route("/sw.js")
+def service_worker():
+    """El service worker se sirve desde la raíz (no desde /static) para que pueda controlar todo el
+    sitio, y sin caché para que cada deploy llegue a los celulares."""
+    respuesta = send_from_directory(os.path.join(BASE_DIR, "static"), "sw.js", mimetype="text/javascript")
+    respuesta.headers["Cache-Control"] = "no-cache"
+    respuesta.headers["Service-Worker-Allowed"] = "/"
+    return respuesta
+
+
 @app.route("/")
 def home():
     user = current_user()
@@ -4227,6 +4258,29 @@ def admin_eliminar_paciente(user, cliente_id):
     return redirect(url_for("admin_dashboard", tab="pacientes"))
 
 
+def momento_registro():
+    """Hora (CDMX, 'YYYY-MM-DD HH:MM:SS') en que de verdad se hizo un registro del recolector. Lo normal
+    es la hora de ahora; pero lo que se registró sin señal se manda horas después y el celular manda en
+    'momento' cuándo se hizo en realidad, para que la hora de inicio/fin de la ruta y la espera de los
+    pacientes no queden desfasadas. Se ignora si no tiene formato, está en el futuro o es de hace más de
+    3 días (reloj del celular mal puesto)."""
+    ahora = ahora_negocio_local()
+    try:
+        dado = datetime.strptime(request.form.get("momento", "").strip(), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return ahora.strftime("%Y-%m-%d %H:%M:%S")
+    if dado > ahora + timedelta(minutes=5) or dado < ahora - timedelta(days=3):
+        return ahora.strftime("%Y-%m-%d %H:%M:%S")
+    return dado.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def aviso_siguiente_parada_permitido():
+    """Lo que se registró sin señal y se manda después ('diferido') ya no es 'ahora': el aviso al
+    paciente de que la camioneta va hacia él solo tiene sentido con el último de esos envíos, no con
+    cada uno (si no, se avisaría a pacientes cuya parada ya pasó)."""
+    return request.form.get("diferido") != "1" or request.form.get("ultimo") == "1"
+
+
 def _tab_volver():
     """A qué pestaña de pacientes regresar después de una acción: la que la mandó (la lista
     completa o la operativa), para no sacar al admin de donde estaba trabajando."""
@@ -6007,13 +6061,14 @@ def recolector_iniciar_ruta(user, ruta_id):
         flash("Esta ruta ya se había iniciado.", "error")
         return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
 
-    ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = momento_registro()
     nuevo_estado = "en_curso" if ruta["estado"] == "planificada" else ruta["estado"]
     db.execute(
         "UPDATE rutas SET hora_inicio_real = ?, estado = ? WHERE id = ?", (ahora, nuevo_estado, ruta_id)
     )
     db.commit()
-    threading.Thread(target=_notificar_siguiente_parada, args=(ruta_id,), daemon=True).start()
+    if aviso_siguiente_parada_permitido():
+        threading.Thread(target=_notificar_siguiente_parada, args=(ruta_id,), daemon=True).start()
     flash("Ruta iniciada. Los horarios de los pacientes se recalculan desde ahora.", "success")
     return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
 
@@ -6035,7 +6090,7 @@ def recolector_finalizar_ruta(user, ruta_id):
         flash("Esta ruta ya se había finalizado.", "error")
         return redirect(url_for("recolector_ver_ruta", ruta_id=ruta_id))
 
-    ahora = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
+    ahora = momento_registro()
     db.execute("UPDATE rutas SET hora_fin_real = ?, estado = 'completada' WHERE id = ?", (ahora, ruta_id))
     registrar_factor_trafico_real(db, ruta_id)
     sin_atender = _liberar_paradas_sin_atender(db, ruta_id)
@@ -6190,7 +6245,7 @@ def recolector_suspender_ruta(user, ruta_id):
 
 
 def _resolver_resultado_parte(db, solicitud_id, tipo, tipo_redistribucion, material, cantidad_cajas,
-                               resultado, parada_id, sufijo_notas=""):
+                               resultado, parada_id, sufijo_notas="", momento=None):
     """Aplica el resultado (completada/ausente/incidencia) que el recolector reportó para UNA
     parte de una parada —la solicitud principal, o la fusionada como 'extra' en la misma
     visita— actualizando el estado de esa solicitud y, si corresponde, registrando el
@@ -6199,7 +6254,7 @@ def _resolver_resultado_parte(db, solicitud_id, tipo, tipo_redistribucion, mater
     es_entrega = tipo == "entrega"
     if resultado == "completada":
         if tipo_redistribucion is None:
-            fecha_reinicio = ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
+            fecha_reinicio = momento or ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S")
             db.execute(
                 "UPDATE solicitudes SET estado = 'pendiente', fecha_reinicio_espera = ? WHERE id = ?",
                 (fecha_reinicio, solicitud_id),
@@ -6386,7 +6441,7 @@ def recolector_actualizar_parada(user, parada_id):
             db.execute(
                 "UPDATE solicitudes SET fecha_reinicio_espera = ? WHERE cliente_id = ? "
                 "AND tipo_redistribucion IS NULL AND estado = 'pendiente'",
-                (ahora_negocio_local().strftime("%Y-%m-%d %H:%M:%S"), parada["cliente_id"]),
+                (momento_registro(), parada["cliente_id"]),
             )
 
     if "cajas" in request.form:
@@ -6404,11 +6459,13 @@ def recolector_actualizar_parada(user, parada_id):
         _resolver_resultado_parte(
             db, parada["solicitud_extra_id"], parada["tipo_extra"], parada["tipo_redistribucion_extra"],
             parada["material_cajas_extra"], parada["cantidad_cajas_extra"], resultado, parada_id, " (extra)",
+            momento=momento_registro(),
         )
     else:
         _resolver_resultado_parte(
             db, parada["solicitud_id"], parada["tipo"], parada["tipo_redistribucion"],
             parada["material_cajas"], parada["cantidad_cajas"], resultado, parada_id, "",
+            momento=momento_registro(),
         )
 
     db.execute(f"UPDATE paradas SET {campo_estado} = ? WHERE id = ?", (resultado, parada_id))
@@ -6428,7 +6485,7 @@ def recolector_actualizar_parada(user, parada_id):
         "FROM paradas WHERE id = ?",
         (parada_id,),
     ).fetchone()["r"]
-    if parada_ya_resuelta and paradas_pendientes > 0:
+    if parada_ya_resuelta and paradas_pendientes > 0 and aviso_siguiente_parada_permitido():
         threading.Thread(
             target=_notificar_siguiente_parada, args=(parada["ruta_id"],), daemon=True
         ).start()
