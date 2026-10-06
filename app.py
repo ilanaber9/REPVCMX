@@ -66,6 +66,9 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # cualquiera sin poder iniciar sesión en desarrollo.
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("DATABASE_PATH"))
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB por archivo subido
+# La sesión dura 30 días desde la última vez que se usó la app (se renueva sola en cada visita), así
+# que no hay que volver a iniciar sesión cada vez que se cierra la app o el navegador.
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 
 # Todo lo de NEF (acceso de NEF, su pestaña para pacientes, la pregunta de si quieren recibir su
 # información y las cuentas de NEF en el admin) sigue en el código pero oculto hasta que haya
@@ -2315,10 +2318,11 @@ def inject_user():
 
 @app.route("/manifest.webmanifest")
 def manifest():
-    """Datos para instalar la app en el celular (Chrome > Instalar app)."""
+    """Datos para instalar la app en el celular (Chrome > Instalar app). Arranca en "/", que ya manda
+    a cada persona a su pantalla según su rol (recolector, paciente, administrador)."""
     respuesta = jsonify({
         "name": "RE-PVC Recolección", "short_name": "RE-PVC", "lang": "es-MX",
-        "start_url": "/recolector", "scope": "/", "display": "standalone",
+        "start_url": "/", "scope": "/", "display": "standalone",
         "background_color": "#ffffff", "theme_color": "#1f7a4d",
         "icons": [
             {"src": url_for("static", filename="icons/icon-192.png"), "sizes": "192x192", "type": "image/png"},
@@ -2434,11 +2438,26 @@ def login():
             flash(f"Esa cuenta no es de {TIPO_LOGIN_LABELS.get(tipo, tipo)}.", "error")
             return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
         registrar_intento_login(db, identidad, exitoso=True)
-        session.clear()
-        session["user_id"] = user["id"]
+        iniciar_sesion(user["id"])
         return redirect(url_for("home"))
     tipo = request.args.get("tipo") or None
     return render_template("login.html", tipo=tipo, tipo_label=TIPO_LOGIN_LABELS.get(tipo))
+
+
+def iniciar_sesion(user_id):
+    """Abre la sesión de una persona y la deja permanente (ver PERMANENT_SESSION_LIFETIME): sin
+    esto la cookie muere al cerrar la app o el navegador y hay que entrar otra vez."""
+    session.clear()
+    session["user_id"] = user_id
+    session.permanent = True
+
+
+@app.before_request
+def _sesion_permanente_para_quien_ya_entro():
+    """Quien ya tenía la sesión abierta antes de este cambio (cookie que moría al cerrar) pasa a
+    sesión permanente en su siguiente visita, sin tener que volver a iniciar sesión."""
+    if "user_id" in session and not session.permanent:
+        session.permanent = True
 
 
 @app.route("/logout")
@@ -2831,8 +2850,7 @@ def verificar_cuenta():
         )
         db.commit()
         flash("¡Cuenta verificada! Ya puedes continuar.", "success")
-        session.clear()
-        session["user_id"] = user["id"]
+        iniciar_sesion(user["id"])
         return redirect(url_for("home"))
     return render_template("verificar_cuenta.html", telefono=request.args.get("telefono", ""))
 
@@ -3998,8 +4016,7 @@ def invitacion_paciente(token):
             (generate_password_hash(password, method="pbkdf2:sha256"), user["id"]),
         )
         db.commit()
-        session.clear()
-        session["user_id"] = user["id"]
+        iniciar_sesion(user["id"])
         flash("¡Cuenta activada! Termina de completar tu perfil para programar tu recolección.", "success")
         return redirect(url_for("home"))
     return render_template("invitacion_paciente.html", token=token, nombre=user["name"])

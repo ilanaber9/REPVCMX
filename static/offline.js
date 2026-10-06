@@ -10,7 +10,6 @@
   var CLAVE_COLA = 'repvc_cola_v1';
   var ESPERA_ENVIO_MS = 12000;
   var enviando = false;
-  var eventoInstalar = null;
 
   // ---------- almacenamiento de la cola ----------
   function leerCola() {
@@ -251,25 +250,7 @@
     });
   }
 
-  // ---------- instalar como app ----------
-  window.addEventListener('beforeinstallprompt', function (evento) {
-    evento.preventDefault();
-    eventoInstalar = evento;
-    var boton = document.getElementById('instalar-app');
-    if (boton) boton.style.display = 'inline-block';
-  });
-  document.addEventListener('click', function (evento) {
-    if (evento.target && evento.target.id === 'instalar-app' && eventoInstalar) {
-      eventoInstalar.prompt();
-      eventoInstalar = null;
-      evento.target.style.display = 'none';
-    }
-  });
-
   // ---------- arranque ----------
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
-  }
   window.addEventListener('online', function () { pintarBarra(); sincronizar(); });
   window.addEventListener('offline', pintarBarra);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) sincronizar(); });

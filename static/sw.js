@@ -1,6 +1,7 @@
 /* Service worker de RE-PVC (recolectores): guarda en el celular las pantallas de rutas y los
    archivos de la app para poder abrirlas sin señal. Lo que el recolector registre sin señal lo
    guarda static/offline.js y lo manda cuando regresa la conexión.
+   (Se registra para todos los roles desde static/instalar.js; el guardado de pantallas es solo del recolector.)
    Sube VERSION si cambias algo aquí, para que los celulares tiren el contenido guardado de antes. */
 const VERSION = 'v1';
 const PAGINAS = 'repvc-paginas-' + VERSION;
